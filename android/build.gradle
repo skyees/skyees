@@ -1,0 +1,43 @@
+// Top-level build file where you can add configuration options common to all sub-projects/modules.
+
+buildscript {
+  repositories {
+    google()
+    mavenCentral()
+  }
+  dependencies {
+    classpath('com.android.tools.build:gradle')
+    classpath('com.facebook.react:react-native-gradle-plugin')
+    classpath('org.jetbrains.kotlin:kotlin-gradle-plugin')
+  }
+}
+ext {
+  ndkVersion = "27.0.11902837"
+}
+defaultConfig {
+    // other defaultConfig entries...
+    externalNativeBuild {
+        cmake {
+            arguments "-DANDROID_STL=c++_shared"
+        }
+    }
+}
+
+packagingOptions {
+    // If Gradle warns, move these into packagingOptions.resources.pickFirst { ... } for newer AGP
+    pickFirst 'lib/armeabi-v7a/libc++_shared.so'
+    pickFirst 'lib/arm64-v8a/libc++_shared.so'
+    pickFirst 'lib/x86/libc++_shared.so'
+    pickFirst 'lib/x86_64/libc++_shared.so'
+}
+
+allprojects {
+  repositories {
+    google()
+    mavenCentral()
+    maven { url 'https://www.jitpack.io' }
+  }
+}
+
+apply plugin: "expo-root-project"
+apply plugin: "com.facebook.react.rootproject"
