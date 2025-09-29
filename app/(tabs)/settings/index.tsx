@@ -27,7 +27,7 @@ const Page = () => {
 
   const items = [
     {
-      name: <View><Link href="/settings/profileSetup">profile</Link></View>,
+      name: 'Account',
       icon: 'key',
       backgroundColor: Colors.primary,
     },
@@ -98,12 +98,13 @@ const Page = () => {
             scrollEnabled={false}
             ItemSeparatorComponent={() => <View style={defaultStyles.separator} />}
             renderItem={({ item }) => (
-              <View style={defaultStyles.item}>
+              <Link href={'/settings/profileSetup'} asChild>
+              <TouchableOpacity style={defaultStyles.item}>
                 <BoxedIcon name={item.icon} backgroundColor={item.backgroundColor} />
-
                 <Text style={{ fontSize: 18, flex: 1 }}>{item.name}</Text>
                 <Ionicons name="chevron-forward" size={20} color={Colors.gray} />
-              </View>
+              </TouchableOpacity>
+              </Link>
             )}
           />
         </View>

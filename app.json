@@ -7,51 +7,49 @@
     "icon": "./assets/images/icon.png",
     "scheme": "whatsapp",
     "userInterfaceStyle": "automatic",
-    "newArchEnabled": true,
     "splash": {
       "image": "./assets/images/splash-icon.png",
       "resizeMode": "contain",
       "backgroundColor": "#ffffff"
     },
     "ios": {
-      "supportsTablet": true
+      "supportsTablet": true,
+      "infoPlist": {
+        "NSCameraUsageDescription": "We need access to your camera",
+        "NSMicrophoneUsageDescription": "We need access to your microphone",
+        "UIBackgroundModes": ["audio"]
+      }
     },
     "android": {
       "adaptiveIcon": {
         "foregroundImage": "./assets/images/adaptive-icon.png",
         "backgroundColor": "#ffffff"
       },
-      "edgeToEdgeEnabled": true,
-      "package": "com.anonymous.whatsapp"
+      "package": "com.anonymous.whatsapp",
+      "compileSdkVersion": 34,
+      "targetSdkVersion": 34,
+      "permissions": [
+        "android.permission.CAMERA",
+        "android.permission.RECORD_AUDIO"
+      ]
     },
     "web": {
       "bundler": "metro",
       "output": "static",
       "favicon": "./assets/images/favicon.png"
     },
-   "expo": {
-    "ios": {
-      "infoPlist": {
-        "NSCameraUsageDescription": "We need access to your camera",
-        "NSMicrophoneUsageDescription": "We need access to your microphone",
-         "UIBackgroundModes": [
-          "audio"
-        ]
-      }
-    },
-    "android": {
-      "permissions": ["READ_EXTERNAL_STORAGE", "WRITE_EXTERNAL_STORAGE"]
-    }
-   },
     "plugins": [
       "expo-router",
       "expo-secure-store",
       "expo-camera"
-      
-      
     ],
     "experiments": {
       "typedRoutes": true
+    },
+    "extra": {
+      "eas": {
+        "projectId": "b7eb837a-7694-452f-b130-d821445ddc2b"
+      }
     }
   }
 }
