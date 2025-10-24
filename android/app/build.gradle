@@ -109,10 +109,10 @@ android {
     buildToolsVersion rootProject.ext.buildToolsVersion
     compileSdk rootProject.ext.compileSdkVersion
 
-    namespace 'com.anonymous.goboss'
+    namespace 'com.goboss.whatsapp'
     defaultConfig {
-        applicationId 'com.anonymous.goboss'
-        minSdkVersion rootProject.ext.minSdkVersion
+        applicationId 'com.goboss.whatsapp'
+        minSdkVersion 24
         targetSdkVersion rootProject.ext.targetSdkVersion
         versionCode 1
         versionName "1.0.0"

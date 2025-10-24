@@ -1,4 +1,4 @@
-package com.anonymous.goboss
+package com.goboss.whatsapp
 
 import android.app.Application
 import android.content.res.Configuration

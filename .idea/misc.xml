@@ -1,5 +1,5 @@
 <project version="4">
-  <component name="ProjectRootManager">
-    <output url="file://$PROJECT_DIR$/out" />
+  <component name="ProjectRootManager" version="2" languageLevel="JDK_24_PREVIEW" project-jdk-name="Android API 34, extension level 7 Platform" project-jdk-type="Android SDK">
+    <output url="file://$USER_HOME$/.gradle/wrapper/dists/gradle-8.13.0-bin" />
   </component>
 </project>
