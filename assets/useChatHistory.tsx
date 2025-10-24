@@ -1,7 +1,7 @@
 import { useState, useEffect } from 'react';
 import axios from 'axios';
 import { useAuth } from '@clerk/clerk-expo';
-
+import { SERVER_URL } from '@/utils/config';
 interface Message {
   _id: string;
   senderId: string;
@@ -15,7 +15,7 @@ const useChatHistory = (id: string, isRoom: boolean, socketRef: any) => {
   const [messages, setMessages] = useState<Message[]>([]);
   const [loading, setLoading] = useState(true);
   const { getToken } = useAuth();
-
+  const apiUrl = process.env.EXPO_PUBLIC_API_URL;
   useEffect(() => {
     const fetchMessages = async () => {
       try {
@@ -24,10 +24,9 @@ const useChatHistory = (id: string, isRoom: boolean, socketRef: any) => {
           console.warn('No token found. User might be logged out.');
           return;
         }
-
         const endpoint = isRoom
-          ? `http://192.168.31.230:3000/api/messages/room/${id}`
-          : `http://192.168.31.230:3000/api/messages/private/${id}`;
+          ? `${apiUrl}/api/messages/room/${id}`
+          : `${apiUrl}/api/messages/private/${id}`;
 
         const res = await axios.get(endpoint, {
           headers: {
@@ -40,9 +39,9 @@ const useChatHistory = (id: string, isRoom: boolean, socketRef: any) => {
         );
 
         setMessages(sortedMessages);
-        console.log('Fetched messages:', sortedMessages);
+        console.log('Fetched messages:', sortedMessages,isRoom);
       } catch (error) {
-        console.error('Fetch messages error:', error);
+        console.error('Fetch messages error:', error,isRoom);
       } finally {
         setLoading(false);
       }

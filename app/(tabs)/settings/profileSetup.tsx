@@ -1,19 +1,20 @@
-import React,{useState} from "react";
-import { View, Text, TextInput, Button, Image, StyleSheet, TouchableOpacity } from "react-native";
+import React, { useState } from "react";
+import { View, Text, TextInput, Image, StyleSheet, TouchableOpacity } from "react-native";
 import { useProfile } from "@/src/contexts/ProfileContext";
-import * as ImagePicker from "expo-image-picker";
 import PickImageModal from '@/components/PickImageModal';
-  const CLOUD_NAME = "dn5m2txky";
-  const UPLOAD_PRESET = "rajkiranv";
+
+const CLOUD_NAME = "dn5m2txky";
+const UPLOAD_PRESET = "rajkiranv";
 
 export default function ProfileSetupScreen() {
+  // Corrected to use username and profilePic from the context
   const {
-    name,
+    username,
     status,
-    photoUrl,
-    setName,
+    profilePic,
+    setUsername,
     setStatus,
-    setPhotoUrl,
+    setProfilePic,
     saveProfile,
     loading,
   } = useProfile();
@@ -21,11 +22,9 @@ export default function ProfileSetupScreen() {
   const [showModal, setShowModal] = useState(false);
 
   const handlePick = (uri: string) => {
-    
-      uploadToCloudinary(uri);
-   
+    uploadToCloudinary(uri);
   };
- 
+
   const uploadToCloudinary = async (uri: string) => {
     const data = new FormData();
     data.append("file", {
@@ -43,10 +42,10 @@ export default function ProfileSetupScreen() {
       }
     );
 
-
     const cloudData = await res.json();
     if (cloudData.secure_url) {
-      setPhotoUrl(cloudData.secure_url);
+      // Corrected to use setProfilePic
+      setProfilePic(cloudData.secure_url);
     } else {
       console.log("Upload failed:", cloudData);
     }
@@ -55,25 +54,26 @@ export default function ProfileSetupScreen() {
   if (loading) return <Text>Loading profile...</Text>;
 
   return (
-   
-   <View style={styles.container}>
+    <View style={styles.container}>
       <Text style={styles.header}>Profile Info</Text>
       <TouchableOpacity onPress={() => setShowModal(true)}>
-          {photoUrl ? (
-          <Image source={{ uri: photoUrl }} style={styles.avatar} />
-         ) : (
-         <View style={styles.avatarPlaceholder}>
-         <Text style={styles.avatarPlaceholderText}>+</Text>
-            </View>
-             )}
+        {/* Corrected to use profilePic */}
+        {profilePic ? (
+          <Image source={{ uri: profilePic }} style={styles.avatar} />
+        ) : (
+          <View style={styles.avatarPlaceholder}>
+            <Text style={styles.avatarPlaceholderText}>+</Text>
+          </View>
+        )}
         <Text>Change Profile Photo</Text>
       </TouchableOpacity>
-  
+
+      {/* Corrected to use username and setUsername */}
       <TextInput
         style={styles.input}
         placeholder="Your Name"
-        value={name}
-        onChangeText={setName}
+        value={username}
+        onChangeText={setUsername}
       />
       <TextInput
         style={styles.input}
@@ -81,20 +81,20 @@ export default function ProfileSetupScreen() {
         value={status}
         onChangeText={setStatus}
       />
-     <TouchableOpacity style={styles.button} onPress={saveProfile}>
+      <TouchableOpacity style={styles.button} onPress={saveProfile}>
         <Text style={styles.buttonText}>Save Profile</Text>
       </TouchableOpacity>
-         <>
-    
-      <PickImageModal
-        visible={showModal}
-        onClose={() => setShowModal(false)}
-        onPick={handlePick}
-      />
-    </>
+      <>
+        <PickImageModal
+          visible={showModal}
+          onClose={() => setShowModal(false)}
+          onPick={handlePick}
+        />
+      </>
     </View>
   );
 }
+
 const styles = StyleSheet.create({
   container: {
     flex: 1,

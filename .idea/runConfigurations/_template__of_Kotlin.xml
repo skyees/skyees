@@ -1,0 +1,10 @@
+<component name="ProjectRunConfigurationManager">
+  <configuration default="true" type="JetRunConfigurationType">
+    <option name="MAIN_CLASS_NAME" value="com.goboss.whatsapp" />
+    <module name="whatsapp" />
+    <shortenClasspath name="NONE" />
+    <method v="2">
+      <option name="Make" enabled="true" />
+    </method>
+  </configuration>
+</component>

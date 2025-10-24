@@ -104,7 +104,7 @@ router.get('/list',clerkAuth, async (req, res) => {
         }
       }
     ]);
-
+   console.error('oneToOne and rooms',oneToOne);
     res.json({ oneToOne, rooms });
   } catch (err) {
     console.error(err);

@@ -1,4 +1,6 @@
 import Colors from '@/constants/Colors';
+import io from 'socket.io-client';
+import { useUser, useAuth } from '@clerk/clerk-expo';
 import { Stack } from 'expo-router';
 import {
   View,
@@ -9,11 +11,12 @@ import {
   StyleSheet,
   TouchableOpacity,
 } from 'react-native';
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { SegmentedControl } from '@/components/SegmentedControl';
 import calls from '@/assets/data/calls.json';
 import { defaultStyles } from '@/constants/Styles';
 import { Ionicons } from '@expo/vector-icons';
+import axios from 'axios';
 import { format } from 'date-fns';
 import Animated, {
   CurvedTransition,
@@ -27,15 +30,60 @@ import SwipeableRow from '@/components/SwipeableRow';
 import * as Haptics from 'expo-haptics';
 
 const transition = CurvedTransition.delay(100);
-
 const AnimatedTouchableOpacity = Animated.createAnimatedComponent(TouchableOpacity);
 
 const Page = () => {
   const [selectedOption, setSelectedOption] = useState('All');
-  const [items, setItems] = useState(calls);
+  const [items, setItems] = useState('');
   const [isEditing, setIsEditing] = useState(false);
   const editing = useSharedValue(-30);
+  const API_URL = process.env.EXPO_PUBLIC_API_URL;
 
+  const { user } = useUser();
+  const { getToken } = useAuth();
+
+  const socket = io(API_URL, { transports: ['websocket'] });
+
+  // ✅ Fetch call list
+  useEffect(() => {
+    const fetchCalls = async () => {
+      try {
+        const token = await getToken();
+        const response = await axios.get(`${API_URL}/api/calls/${user?.id}`, {
+          headers: { Authorization: `Bearer ${token}` },
+        });
+        setItems(response.data);
+      } catch (error) {
+        console.error('❌ Error fetching calls:', error);
+      }
+    };
+    if (user) fetchCalls();
+  }, [user]);
+
+  // ✅ Listen for real-time call updates
+  useEffect(() => {
+    if (!socket) return;
+
+    // Register user ID for socket room
+    if (user?.id) socket.emit('register', user.id);
+
+    socket.on('call-added', (newCall) => {
+      setItems((prev) => [newCall, ...prev]);
+    });
+
+    socket.on('call-ended', (endedCall) => {
+      setItems((prev) =>
+        prev.map((item) => (item._id === endedCall._id ? endedCall : item))
+      );
+    });
+
+    return () => {
+      socket.off('call-added');
+      socket.off('call-ended');
+    };
+  }, [socket, user]);
+
+  // ✅ Segment filter
   const onSegmentChange = (option: string) => {
     setSelectedOption(option);
     if (option === 'All') {
@@ -45,13 +93,15 @@ const Page = () => {
     }
   };
 
+  // ✅ Delete handler
   const removeCall = (toDelete: any) => {
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
     setItems(items.filter((item) => item.id !== toDelete.id));
   };
 
+  // ✅ Edit mode
   const onEdit = () => {
-    let editingNew = !isEditing;
+    const editingNew = !isEditing;
     editing.value = editingNew ? 0 : -30;
     setIsEditing(editingNew);
   };
@@ -93,7 +143,7 @@ const Page = () => {
             data={items}
             scrollEnabled={false}
             itemLayoutAnimation={transition}
-            keyExtractor={(item) => item.id.toString()}
+            keyExtractor={(item) => item._id?.toString() || item.id.toString()}
             ItemSeparatorComponent={() => <View style={defaultStyles.separator} />}
             renderItem={({ item, index }) => (
               <SwipeableRow onDelete={() => removeCall(item)}>
@@ -134,7 +184,9 @@ const Page = () => {
                         gap: 6,
                         alignItems: 'center',
                       }}>
-                      <Text style={{ color: Colors.gray }}>{format(item.date, 'MM.dd.yy')}</Text>
+                      <Text style={{ color: Colors.gray }}>
+                        {format(new Date(item.date), 'MM.dd.yy')}
+                      </Text>
                       <Ionicons
                         name="information-circle-outline"
                         size={24}
@@ -159,4 +211,5 @@ const styles = StyleSheet.create({
     borderRadius: 20,
   },
 });
+
 export default Page;

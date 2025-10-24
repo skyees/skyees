@@ -1,13 +1,13 @@
-// utils/socket.ts
 import { io } from "socket.io-client";
 
-let socket;
+const apiURL = process.env.EXPO_PUBLIC_API_URL;
 
+// Create the socket instance one time when the module is first loaded.
+const socket = io(`${apiURL}`, {
+  transports: ["websocket"],
+});
+
+// The function now just returns the single, already-created instance.
 export default function useSocket() {
-  if (!socket) {
-    socket = io("http://192.168.31.230:3000", {
-      transports: ["websocket"],
-    });
-  }
   return socket;
 }

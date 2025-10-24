@@ -62,7 +62,7 @@ const Layout = () => {
                 }}
                 style={{ width: 40, height: 40, borderRadius: 50 }}
               />
-            
+
             </View>
           ),
           headerRight: () => (

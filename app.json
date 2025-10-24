@@ -2,54 +2,20 @@
   "expo": {
     "name": "whatsapp",
     "slug": "whatsapp",
-    "version": "1.0.0",
-    "orientation": "portrait",
-    "icon": "./assets/images/icon.png",
     "scheme": "whatsapp",
-    "userInterfaceStyle": "automatic",
-    "splash": {
-      "image": "./assets/images/splash-icon.png",
-      "resizeMode": "contain",
-      "backgroundColor": "#ffffff"
-    },
-    "ios": {
-      "supportsTablet": true,
-      "infoPlist": {
-        "NSCameraUsageDescription": "We need access to your camera",
-        "NSMicrophoneUsageDescription": "We need access to your microphone",
-        "UIBackgroundModes": ["audio"]
-      }
-    },
     "android": {
-      "adaptiveIcon": {
-        "foregroundImage": "./assets/images/adaptive-icon.png",
-        "backgroundColor": "#ffffff"
-      },
-      "package": "com.anonymous.whatsapp",
-      "compileSdkVersion": 34,
-      "targetSdkVersion": 34,
-      "permissions": [
-        "android.permission.CAMERA",
-        "android.permission.RECORD_AUDIO"
-      ]
-    },
-    "web": {
-      "bundler": "metro",
-      "output": "static",
-      "favicon": "./assets/images/favicon.png"
-    },
-    "plugins": [
-      "expo-router",
-      "expo-secure-store",
-      "expo-camera"
-    ],
-    "experiments": {
-      "typedRoutes": true
+      "package": "com.goboss.whatsapp"
     },
     "extra": {
       "eas": {
         "projectId": "b7eb837a-7694-452f-b130-d821445ddc2b"
-      }
+      },
+      "EXPO_PUBLIC_CLERK_PUBLISHABLE_KEY": "pk_test_ZmxleGlibGUtZ3JpZmZvbi04My5jbGVyay5hY2NvdW50cy5kZXYk",
+      "EXPO_PUBLIC_API_URL": "http://192.168.1.2:3000",
+      "router": {}
+    },
+    "experiments": {
+      "typedRoutes": true
     }
   }
 }

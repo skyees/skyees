@@ -1,0 +1,14 @@
+{
+  "expo": {
+    "name": "api",
+    "slug": "api",
+    "version": "1.0.0",
+    "description": "",
+    "sdkVersion": "51.0.0",
+    "platforms": [
+      "ios",
+      "android",
+      "web"
+    ]
+  }
+}

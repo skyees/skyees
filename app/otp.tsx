@@ -28,7 +28,7 @@ const IND_PHONE = [
 
 
 const otp = () => {
-const [loading, setLoading] = useState(false);
+const [loading,setLoading] = useState(true);
 const [phoneNumber, setPhoneNumber] = useState('');
 const keyboardVerticalOffset = Platform.OS === 'ios' ? 90 : 0;
 
@@ -97,7 +97,7 @@ const keyboardVerticalOffset = Platform.OS === 'ios' ? 90 : 0;
    return (
      <KeyboardAvoidingView behavior="padding" keyboardVerticalOffset={keyboardVerticalOffset} style={{flex:1}}>
        <View style={Styles.container}>
-        {loading && (<View style={[StyleSheet.absoluteFill,Styles.loading]}>
+        {!loading && (<View style={[StyleSheet.absoluteFill,Styles.loading]}>
           <ActivityIndicator size="large" color={Colors.primary}/>
           <Text style={{fontSize:18, padding:10}}>Sending Code...</Text>
           </View>)}

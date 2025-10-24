@@ -1,5 +1,6 @@
 const router = require('express').Router();
 const Message = require('../models/Message');
+const mongoose = require("mongoose");;
 const User = require('../models/User'); // Import User model to fetch usernames
 const Room = require('../models/Room'); // Import Room model to fetch room names
 const { ClerkExpressRequireAuth } = require("@clerk/clerk-sdk-node");
@@ -19,7 +20,6 @@ router.get('/private/:id', clerkAuth, async (req, res) => {
         { senderId: myId, receiverId: id },
         { senderId: id, receiverId: myId }
       ],
-      roomId: { $exists: false },
     })
       .sort({ createdAt: 1 })
       .lean();
@@ -44,11 +44,12 @@ router.get('/private/:id', clerkAuth, async (req, res) => {
 // ✅ Messages in a group room
 router.get('/room/:id', clerkAuth, async (req, res) => {
   const { id } = req.params;
-
+ // ✅ ADD THIS LINE TO CHECK THE TYPE
+  console.log('The type of the "id" variable is:', typeof id);
   try {
-    const messages = await Message.find({ roomId: id })
-      .sort({ createdAt: 1 })
-      .lean();
+     const messages = await Message.find({ roomId: new mongoose.Types.ObjectId(id) })
+          .sort({ createdAt: 1 })
+          .lean();
 
     const userIds = [...new Set(messages.map(msg => msg.senderId))];
     const users = await User.find({ clerkId: { $in: userIds } }).lean();
@@ -61,7 +62,8 @@ router.get('/room/:id', clerkAuth, async (req, res) => {
       senderName: userMap[msg.senderId] || 'Unknown',
       roomName: room?.name || 'Room',
     }));
-
+    const objectId = mongoose.Types.ObjectId.isValid(id)
+ console.error('Room message fetch messages:id', enriched,messages,id,objectId);
     res.json(enriched);
   } catch (error) {
     console.error('Room message fetch error:', error);

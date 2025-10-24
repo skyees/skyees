@@ -30,6 +30,14 @@ const TabsLayout = () => {
             ),
           }}
         />
+      <Tabs.Screen
+        name="contacts"   // <-- must match folder name "contacts"
+        options={{
+          title: 'Contacts',
+          tabBarIcon: ({ size, color }) => <MaterialCommunityIcons name="contacts-outline" size={size} color={color} />,
+           headerShown: false,
+        }}
+      />
         <Tabs.Screen
           name="calls"
           options={{

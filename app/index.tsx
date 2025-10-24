@@ -5,6 +5,7 @@ import { Text ,View, Image, StyleSheet ,TouchableOpacity} from 'react-native';
 import Colors from "@/constants/Colors";
 
 const index = () => {
+
  const openLink = () =>{
 
  }
@@ -44,7 +45,7 @@ container:{
 
 headline:{
 fontSize:24,
-fontWeight:600,
+fontWeight:'600',
 marginVertical:80,
 },
 

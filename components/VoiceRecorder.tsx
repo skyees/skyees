@@ -1,9 +1,43 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState } from 'react';
 import { Modal, View, Text, TouchableOpacity, ActivityIndicator, StyleSheet } from 'react-native';
 import { Audio } from 'expo-av';
-import * as FileSystem from 'expo-file-system';
 import { Ionicons } from '@expo/vector-icons';
-import { uploadToCloudinary } from '../utils/uploadToCloudinary';
+
+// ========= ADDED: Cloudinary Configuration =========
+const CLOUD_NAME = "dn5m2txky";
+const UPLOAD_PRESET = "rajkiranv";
+
+const uploadToCloudinary = async (uri: string) => {
+  const data = new FormData();
+  data.append('file', {
+    uri,
+    name: `audio-${Date.now()}.m4a`,
+    type: 'audio/m4a',
+  } as any);
+  data.append('upload_preset', UPLOAD_PRESET);
+  data.append('resource_type', 'video'); // Cloudinary uses the 'video' resource type for audio
+
+  try {
+    const res = await fetch(
+      `https://api.cloudinary.com/v1_1/${CLOUD_NAME}/video/upload`,
+      {
+        method: 'POST',
+        body: data,
+      }
+    );
+    const cloudData = await res.json();
+    if (cloudData.secure_url) {
+      return cloudData.secure_url;
+    } else {
+      console.error("Cloudinary upload failed:", cloudData);
+      throw new Error("Cloudinary upload failed");
+    }
+  } catch (error) {
+    console.error("Error uploading to cloudinary", error);
+    throw error;
+  }
+};
+// ===================================================
 
 interface VoiceRecorderProps {
   visible: boolean;
@@ -24,12 +58,9 @@ const VoiceRecorder = ({ visible, onClose, onSend, userId }: VoiceRecorderProps)
         playsInSilentModeIOS: true,
       });
 
-        const  recording  = new Audio.Recording();
-        await recording.prepareToRecordAsync(Audio.RECORDING_OPTIONS_PRESET_HIGH_QUALITY);
-        await recording.startAsync();
-
-
-
+      const { recording } = await Audio.Recording.createAsync(
+        Audio.RECORDING_OPTIONS_PRESET_HIGH_QUALITY
+      );
       setRecording(recording);
     } catch (err) {
       console.error('Failed to start recording', err);
@@ -43,7 +74,9 @@ const VoiceRecorder = ({ visible, onClose, onSend, userId }: VoiceRecorderProps)
       const uri = recording?.getURI();
       if (!uri) throw new Error('No URI found');
 
-      const audioUrl = await uploadToCloudinary(uri, 'audio');
+      // Correctly call the upload function
+      const audioUrl = await uploadToCloudinary(uri);
+
       onSend([
         {
           _id: Date.now().toString(),
@@ -52,6 +85,7 @@ const VoiceRecorder = ({ visible, onClose, onSend, userId }: VoiceRecorderProps)
           audio: audioUrl,
         },
       ]);
+     console.log('Recording audioUrl', audioUrl);
     } catch (err) {
       console.error('Recording error:', err);
     } finally {

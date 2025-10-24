@@ -1,91 +1,108 @@
-import React, { createContext, useContext, useState, useEffect } from "react";
-import axios from "axios";
-import { useAuth } from "@clerk/clerk-expo";
+import React, { createContext, useContext, useState, useEffect } from 'react';
+import axios from 'axios';
+import { useAuth } from '@clerk/clerk-expo';
 
-// Define the shape
-type ProfileType = {
-  name: string;
+// 1. Define the type to match the server model
+interface ProfileContextType {
+  username: string;
   status: string;
-  photoUrl: string;
-  setName: (val: string) => void;
-  setStatus: (val: string) => void;
-  setPhotoUrl: (val: string) => void;
-  saveProfile: () => Promise<void>;
+  profilePic: string;
   loading: boolean;
-};
+  setUsername: React.Dispatch<React.SetStateAction<string>>;
+  setStatus: React.Dispatch<React.SetStateAction<string>>;
+  setProfilePic: React.Dispatch<React.SetStateAction<string>>;
+  saveProfile: () => Promise<void>;
+}
 
-// Context default value
-const ProfileContext = createContext<ProfileType>({
-  name: "",
-  status: "",
-  photoUrl: "",
-  setName: () => {},
-  setStatus: () => {},
-  setPhotoUrl: () => {},
-  saveProfile: async () => {},
-  loading: true,
-});
+const ProfileContext = createContext<ProfileContextType | undefined>(undefined);
 
-// Provider component
-export const ProfileProvider = ({ children }: { children: React.ReactNode }) => {
-  const [name, setName] = useState("");
-  const [status, setStatus] = useState("");
-  const [photoUrl, setPhotoUrl] = useState("");
+export const ProfileProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
+  const { isSignedIn, getToken } = useAuth();
   const [loading, setLoading] = useState(true);
+  
+  // 2. Create states that match the server model
+  const [username, setUsername] = useState('');
+  const [status, setStatus] = useState('');
+  const [profilePic, setProfilePic] = useState('');
+  
+  const apiUrl = process.env.EXPO_PUBLIC_API_URL;
 
-  const { getToken } = useAuth();
-
+  // Effect to fetch the initial profile
   useEffect(() => {
     const fetchProfile = async () => {
-      const token = await getToken();
-      try {
-        const res = await axios.get("http://192.168.31.230:3000/api/users/profile", {
-          headers: { Authorization: `Bearer ${token}` },
-        });
-        if (res.data) {
-          setName(res.data.username || "");
-          setStatus(res.data.status || "");
-          setPhotoUrl(res.data.profilePic || "");
+      if (isSignedIn) {
+        setLoading(true);
+        try {
+          const token = await getToken();
+          if (!token) return;
+
+          const res = await axios.get(`${apiUrl}/api/users/profile`, {
+            headers: { Authorization: `Bearer ${token}` },
+          });
+
+          // 3. Populate states from fetched data, using the correct field names
+          if (res.data) {
+            setUsername(res.data.username || '');
+            setStatus(res.data.status || '');
+            setProfilePic(res.data.profilePic || '');
+          }
+        } catch (error) {
+          console.error('Error fetching profile:', error);
+        } finally {
+          setLoading(false);
         }
-      } catch (err) {
-        console.error("Failed to fetch profile", err);
+      } else {
+        setUsername('');
+        setStatus('');
+        setProfilePic('');
+        setLoading(false);
       }
-      setLoading(false);
     };
-
     fetchProfile();
-  }, []);
+  }, [isSignedIn]);
 
+  // 4. Define the saveProfile function to send the correct field names
   const saveProfile = async () => {
-    const token = await getToken();
+    setLoading(true);
     try {
-      const res = await axios.post(
-        "http://157.50.98.77:3000/api/users/profile",
-        {
-          username: name,
-          status: status,
-          profilePic: photoUrl,
-        },
-        {
-          headers: {
-            Authorization: `Bearer ${token}`,
-          },
-        }
-      );
-      console.log("Saved profile:", res.data);
-    } catch (err) {
-      console.error("Save failed:", err);
+      const token = await getToken();
+      if (!token) throw new Error("No auth token");
+
+      const updatedProfile = { username, status, profilePic };
+
+      await axios.post(`${apiUrl}/api/users/profile`, updatedProfile, {
+        headers: { Authorization: `Bearer ${token}` },
+      });
+    } catch (error) {
+      console.error('Error saving profile:', error);
+    } finally {
+      setLoading(false);
     }
   };
 
+  // 5. Provide all the states and functions with the correct names
+  const value = {
+    username,
+    status,
+    profilePic,
+    loading,
+    setUsername,
+    setStatus,
+    setProfilePic,
+    saveProfile,
+  };
+
   return (
-    <ProfileContext.Provider
-      value={{ name, status, photoUrl, setName, setStatus, setPhotoUrl, saveProfile, loading }}
-    >
+    <ProfileContext.Provider value={value}>
       {children}
     </ProfileContext.Provider>
   );
 };
 
-// Custom hook for easy usage
-export const useProfile = () => useContext(ProfileContext);
+export const useProfile = () => {
+  const context = useContext(ProfileContext);
+  if (!context) {
+    throw new Error('useProfile must be used within a ProfileProvider');
+  }
+  return context;
+};

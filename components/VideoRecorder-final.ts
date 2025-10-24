@@ -105,7 +105,7 @@ export default function VideoRecorder({
     cameraRef.current?.stopRecording();
   };
 
-  const handleUpload = async (event) => {
+  const handleUpload = async () => {
     const isPhoto = !!photoUri;
     const uri = photoUri || videoUri;
     if (!uri) return;
@@ -123,14 +123,11 @@ export default function VideoRecorder({
           avatar: photoUrl || undefined,
         },
       };
-      console.log('uploadedUrl set [message]',[message]);
-      console.log('uploadedUrl',uploadedUrl);
 
       onSend([message]);
       setVideoUri(null);
       setPhotoUri(null);
       onClose();
-      return uploadedUrl;
     } catch (err) {
       console.error("Upload error:", err);
       Alert.alert("Upload failed", "Could not upload the file.");
