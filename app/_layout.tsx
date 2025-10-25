@@ -93,6 +93,14 @@ const InitialLayout = () => {
           headerBackTitle: 'Edit number',
         }}
       />
+       <Stack.Screen
+              name="verify/verify-email/[email]"
+              options={{
+                title: 'Verify Your Phone Number',
+                headerShown: true,
+                headerBackTitle: 'Edit number',
+              }}
+            />
       <Stack.Screen name="(tabs)" options={{ headerShown: false }} />
       <Stack.Screen
         name="(modals)/new-chat"

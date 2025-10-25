@@ -5,17 +5,23 @@ require('dotenv').config();
 const { ClerkExpressRequireAuth } = require("@clerk/clerk-sdk-node");
 
 const clerkAuth = ClerkExpressRequireAuth();
-    router.get("/", clerkAuth, async (req, res) => {
-      try {
-        const clerkId = req.auth.userId;
-        const users = await User.find({ clerkId: { $ne: clerkId } });
+router.get("/", clerkAuth, async (req, res) => {
+  try {
+    console.log("🔐 Clerk Auth:", req.auth);
+    const clerkId = req.auth.userId;
+    if (!clerkId) {
+      console.error("❌ No userId in req.auth");
+      return res.status(401).json({ message: "Unauthorized: No Clerk userId" });
+    }
 
-        res.status(200).json(users); // Send the full array of user objects
-      } catch (error) {
-        console.error("Error fetching users:", error);
-        res.status(500).json({ message: "Server error while fetching users" });
-      }
-    });
+    const users = await User.find({ clerkId: { $ne: clerkId } });
+    console.log("✅ Users fetched:", users.length);
+    res.status(200).json(users);
+  } catch (error) {
+    console.error("🔥 Server Error while fetching users:", error);
+    res.status(500).json({ message: "Server error while fetching users" });
+  }
+});
 // ✅ Create or update user profile
 router.post("/profile", clerkAuth, async (req, res) => {
   const clerkId = req.auth.userId;

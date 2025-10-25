@@ -31,12 +31,15 @@ const ContactsScreen = () => {
 
   const router = useRouter();
   const apiUrl = process.env.EXPO_PUBLIC_API_URL;
-  const { getToken } = useAuth();
+  const { getToken,isSignedIn } = useAuth();
 
   useEffect(() => {
-    if (!getToken) return;
-    fetchContacts();
-  }, [getToken]);
+         if (!isSignedIn) {
+             setContacts([]); // Clear chats if the user signs out
+           return;
+        }
+       fetchContacts();
+  }, [isSignedIn]);
 
   const fetchContacts = async () => {
     try {
@@ -44,14 +47,17 @@ const ContactsScreen = () => {
       setError(null);
       const token = await getToken();
 
+          console.log("🪪 Clerk token:", token,`${apiUrl}/api/users`);
       const res = await axios.get(`${apiUrl}/api/users`, {
         headers: {
           Authorization: `Bearer ${token}`,
         },
       });
       setContacts(res.data);
+      console.error("res.data contacts list  details:", res.data);
     } catch (err: any) {
       console.error("Error fetching contacts:", err);
+      if (error.errors) console.error("Clerk error details:", error.errors);
       setError("Failed to load contacts. Please check your connection.");
     } finally {
       // This will now correctly turn off the loading indicator once

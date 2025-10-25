@@ -25,7 +25,7 @@ const Page = () => {
             try {
                 const token = await getToken();
                 if (!token) return;
-
+                console.log('chat list token', token,`${apiUrl}/api/chats/list`)
                 const url = `${apiUrl}/api/chats/list`;
                 const response = await axios.get(url, {
                     headers: { Authorization: `Bearer ${token}` },

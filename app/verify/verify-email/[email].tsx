@@ -1,18 +1,28 @@
 import Colors from '@/constants/Colors';
 import { useSignUp, isClerkAPIResponseError, useSignIn } from '@clerk/clerk-expo';
-import { Stack, useLocalSearchParams } from 'expo-router';
+import { Stack, useLocalSearchParams, useRouter } from 'expo-router';
 import { useEffect, useState } from 'react';
 import { View, Text, TouchableOpacity, StyleSheet, Alert } from 'react-native';
-import { CodeField, Cursor, useBlurOnFulfill, useClearByFocusCell } from 'react-native-confirmation-code-field';
+import {
+  CodeField,
+  Cursor,
+  useBlurOnFulfill,
+  useClearByFocusCell,
+} from 'react-native-confirmation-code-field';
 
 const CELL_COUNT = 6;
 
 const Page = () => {
-  const { phone, signin } = useLocalSearchParams<{ phone: string; signin: string }>();
+  const { email, signin } = useLocalSearchParams<{ email: string; signin: string }>();
   const [code, setCode] = useState('');
+  const router = useRouter();
 
   const ref = useBlurOnFulfill({ value: code, cellCount: CELL_COUNT });
-  const [props, getCellOnLayoutHandler] = useClearByFocusCell({ value: code, setValue: setCode });
+  const [props, getCellOnLayoutHandler] = useClearByFocusCell({
+    value: code,
+    setValue: setCode,
+  });
+
   const { signUp, setActive } = useSignUp();
   const { signIn } = useSignIn();
 
@@ -21,16 +31,18 @@ const Page = () => {
       if (signin === 'true') {
         verifySignIn();
       } else {
-        verifyCode();
+        verifySignUp();
       }
     }
   }, [code]);
 
-  const verifyCode = async () => {
+  const verifySignUp = async () => {
     try {
-      await signUp!.attemptPhoneNumberVerification({ code });
+      await signUp!.attemptEmailAddressVerification({ code });
       await setActive!({ session: signUp!.createdSessionId });
+      router.replace('/(tabs)/chats');
     } catch (err) {
+      console.log('SignUp verify error', JSON.stringify(err, null, 2));
       if (isClerkAPIResponseError(err)) {
         Alert.alert('Error', err.errors[0].message);
       }
@@ -39,9 +51,14 @@ const Page = () => {
 
   const verifySignIn = async () => {
     try {
-      await signIn!.attemptFirstFactor({ strategy: 'phone_code', code });
+      await signIn!.attemptFirstFactor({
+        strategy: 'email_code',
+        code,
+      });
       await setActive!({ session: signIn!.createdSessionId });
+      router.replace('/(tabs)/chats');
     } catch (err) {
+      console.log('SignIn verify error', JSON.stringify(err, null, 2));
       if (isClerkAPIResponseError(err)) {
         Alert.alert('Error', err.errors[0].message);
       }
@@ -51,14 +68,17 @@ const Page = () => {
   const resendCode = async () => {
     try {
       if (signin === 'true') {
-        const { supportedFirstFactors } = await signIn!.create({ identifier: phone });
-        const firstPhoneFactor: any = supportedFirstFactors.find(f => f.strategy === 'phone_code');
-        await signIn!.prepareFirstFactor({ strategy: 'phone_code', phoneNumberId: firstPhoneFactor.phoneNumberId });
+        await signIn!.create({ identifier: email });
+        await signIn!.prepareFirstFactor({
+          strategy: 'email_code',
+        });
       } else {
-        await signUp!.create({ phoneNumber: phone });
-        await signUp!.preparePhoneNumberVerification();
+        await signUp!.create({ emailAddress: email });
+        await signUp!.prepareEmailAddressVerification();
       }
+      Alert.alert('Verification code sent', `We sent a new code to ${email}`);
     } catch (err) {
+      console.log('Resend error', JSON.stringify(err, null, 2));
       if (isClerkAPIResponseError(err)) {
         Alert.alert('Error', err.errors[0].message);
       }
@@ -67,9 +87,9 @@ const Page = () => {
 
   return (
     <View style={styles.container}>
-      <Stack.Screen options={{ title: phone }} />
-      <Text style={styles.legal}>We have sent you an SMS with a code to the number above.</Text>
-      <Text style={styles.legal}>To complete your phone number verification, please enter the 6-digit activation code.</Text>
+      <Stack.Screen options={{ title: email }} />
+      <Text style={styles.legal}>We sent a verification code to your email.</Text>
+      <Text style={styles.legal}>Enter the 6-digit code below to verify your email address.</Text>
 
       <CodeField
         ref={ref}
@@ -81,14 +101,17 @@ const Page = () => {
         keyboardType="number-pad"
         textContentType="oneTimeCode"
         renderCell={({ index, symbol, isFocused }) => (
-          <View key={index} onLayout={getCellOnLayoutHandler(index)} style={[styles.cellRoot, isFocused && styles.focusCell]}>
+          <View
+            key={index}
+            onLayout={getCellOnLayoutHandler(index)}
+            style={[styles.cellRoot, isFocused && styles.focusCell]}>
             <Text style={styles.cellText}>{symbol || (isFocused ? <Cursor /> : null)}</Text>
           </View>
         )}
       />
 
       <TouchableOpacity style={styles.button} onPress={resendCode}>
-        <Text style={styles.buttonText}>Didn't receive a verification code?</Text>
+        <Text style={styles.buttonText}>Didn’t get a code? Resend</Text>
       </TouchableOpacity>
     </View>
   );
