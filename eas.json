@@ -1,0 +1,42 @@
+{
+  "cli": {
+    "version": ">= 16.19.3",
+    "appVersionSource": "remote"
+  },
+  "build": {
+    "preview": {
+      "distribution": "internal",
+      "android": {
+        "buildType": "apk"
+      },
+      "env": {
+        "EXPO_PUBLIC_CLERK_PUBLISHABLE_KEY": "pk_live_Y2xlcmsuc2t5ZWVzLmNvbSQ",
+        "EXPO_PUBLIC_API_URL": "https://skyees.com",
+        "EXPO_PUBLIC_SERVER_URL": "https://skyees.com/api"
+      }
+    },
+    "development": {
+      "developmentClient": true,
+      "distribution": "internal",
+      "android": {
+        "buildType": "apk"
+      },
+      "env": {
+        "EXPO_PUBLIC_CLERK_PUBLISHABLE_KEY": "pk_live_Y2xlcmsuc2t5ZWVzLmNvbSQ",
+        "EXPO_PUBLIC_API_URL": "https://skyees.com",
+        "EXPO_PUBLIC_SERVER_URL": "https://skyees.com/api"
+      }
+    },
+    "production": {
+      "autoIncrement": true,
+      "env": {
+        "EXPO_PUBLIC_CLERK_PUBLISHABLE_KEY": "pk_live_Y2xlcmsuc2t5ZWVzLmNvbSQ",
+        "EXPO_PUBLIC_API_URL": "https://skyees.com",
+        "EXPO_PUBLIC_SERVER_URL": "https://skyees.com/api"
+      }
+    }
+  },
+  "submit": {
+    "production": {}
+  }
+}
