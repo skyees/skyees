@@ -12,6 +12,7 @@ export default function Layout() {
         options={{
           title: 'Calls',
           headerLargeTitle: true,
+           headerTitleAlign: 'center',
           headerShadowVisible: false,
           headerStyle: { backgroundColor: Colors.background },
           headerSearchBarOptions: { placeholder: 'Search' },

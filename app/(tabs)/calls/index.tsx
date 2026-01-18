@@ -85,7 +85,7 @@ const Page = () => {
               (a, b) => new Date(b.createdAt) - new Date(a.createdAt)
             );
 
-            setCalls(sortedCalls.slice(0, 20));
+        setCalls(sortedCalls.slice(0, 20));
         setAllItems(sortedCalls);
       } catch (error) {
         console.error('❌ Error fetching calls:', error);

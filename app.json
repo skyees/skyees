@@ -1,0 +1,20 @@
+{
+  "expo": {
+    "extra": {
+      "eas": {
+        "projectId": "326ad1aa-a378-4cc0-96e5-a24a2ce6678a"
+      }
+    },
+    "android": {
+      "package": "com.goboss.skyees"
+    },
+       "plugins": [
+      [
+        "expo-contacts",
+        {
+          "contactsPermission": "Allow Skyees to access your contacts."
+        }
+      ]
+    ]
+  }
+}

@@ -61,6 +61,7 @@ const TabsLayout = () => {
             tabBarIcon: ({ size, color }) => (
               <MaterialIcons name="update" size={size} color={color} />
             ),
+            headerShown: false,
           }}
         />
         <Tabs.Screen
@@ -81,9 +82,9 @@ const TabsLayout = () => {
         />
         {/* ... rest of your screens ... */}
         <Tabs.Screen
-          name="communities"
+          name="network"
           options={{
-            title: 'Communities',
+            title: 'Network',
             tabBarIcon: ({ size, color }) => (
               <MaterialIcons name="people" size={size} color={color} />
             ),

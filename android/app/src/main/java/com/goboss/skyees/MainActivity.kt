@@ -1,4 +1,4 @@
-package com.skyees.app
+package com.goboss.skyees
 
 import android.os.Build
 import android.os.Bundle

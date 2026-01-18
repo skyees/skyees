@@ -20,21 +20,21 @@ const ChatMessageBox = ({
   updateRowRef,
   socket,
   setEditingMessage,
-  editingMessage,
   editedText,
   setEditedText,
   ...props
 }: ChatMessageBoxProps) => {
   const msg = props.currentMessage;
-
   const [sound, setSound] = useState<Audio.Sound | null>(null);
-  const isMine = props.position === "right";
+  const isMine = props.position === 'right';
 
   useEffect(() => {
-    return () => sound?.unloadAsync();
+    return () => {
+      sound?.unloadAsync();
+    };
   }, [sound]);
 
-  // ✅ SWIPE REPLY ACTION
+  // ✅ Swipe reply action
   const renderLeftActions = () => (
     <View style={styles.replySwipe}>
       <Ionicons name="arrow-undo" size={22} color="white" />
@@ -45,90 +45,101 @@ const ChatMessageBox = ({
     if (msg) setReplyOnSwipeOpen(msg);
   };
 
-  // ✅ LONG PRESS OPTIONS
+  // ✅ Long press options
   const onLongPress = () => {
     if (!msg) return;
 
     const options = isMine
-      ? ["Reply", "Edit", "Delete", "Cancel"]
-      : ["Reply", "Cancel"];
+      ? ['Reply', 'Edit', 'Delete', 'Cancel']
+      : ['Reply', 'Cancel'];
 
     Alert.alert(
-      "Message Options",
-      "",
+      'Message Options',
+      '',
       options.map((op) => ({
         text: op,
         onPress: () => {
-          if (op === "Reply") setReplyOnSwipeOpen(msg);
+          if (op === 'Reply') setReplyOnSwipeOpen(msg);
 
-          if (op === "Edit" && isMine) {
+          if (op === 'Edit' && isMine) {
             setEditingMessage(msg);
-            setEditedText(msg.text || "");
+            setEditedText(msg.text || '');
           }
 
-          if (op === "Delete" && isMine) {
-            socket.emit("delete-message", { messageId: msg._id });
+          if (op === 'Delete' && isMine) {
+            socket.emit('delete-message', { messageId: msg._id });
           }
         },
-        style: op === "Delete" ? "destructive" : "default",
+        style: op === 'Delete' ? 'destructive' : 'default',
       }))
     );
   };
 
-  // ✅ --- WHATSAPP STYLE REPLY PREVIEW ---
+  // ✅ WhatsApp-style reply preview
   const renderReplyPreview = () => {
-    if (!msg.replyTo) return null;
-
+    if (!msg?.replyTo) return null;
     const reply = msg.replyTo;
 
     let preview =
       reply.text ||
-      (reply.image ? "📷 Photo" : reply.video ? "📹 Video" : reply.audio ? "🎤 Voice" : "Message");
+      (reply.image
+        ? '📷 Photo'
+        : reply.video
+        ? '📹 Video'
+        : reply.audio
+        ? '🎤 Voice'
+        : 'Message');
 
     return (
       <View style={styles.replyBubble}>
         <Text style={styles.replySender}>
-        {reply.senderId === props.user?._id ? "You" : (reply.senderName || "Contact")}
-       </Text>
-        <Text numberOfLines={1} style={styles.replyPreviewText}>
+          {reply.senderId === props.user?._id
+          ? 'You'
+          : reply.senderName
+          ? reply.senderName  
+          : 'Unknown'}         
+        </Text>
+        <Text numberOfLines={6} style={styles.replyPreviewText}>
           {preview}
         </Text>
       </View>
     );
   };
 
-  // ✅ MAIN MESSAGE CONTENT
+  // ✅ Main message body
   const renderMessageBody = () => {
     const bubbleStyle = [
       styles.bubble,
       {
-        backgroundColor: isMine ? "#dcf8c6" : "#ffffff",
-        alignSelf: isMine ? "flex-end" : "flex-start",
+        backgroundColor: isMine ? '#dcf8c6' : '#ffffff',
+        alignSelf: isMine ? 'flex-end' : 'flex-start',
       },
     ];
 
-    // ---- TEXT ----
-    if (msg.text) {
+    // ---- Text ----
+    if (msg?.text) {
       return (
         <View style={bubbleStyle}>
           {renderReplyPreview()}
           <Text style={styles.text}>{msg.text}</Text>
+          {msg.edited && <Text style={styles.editedFlag}>(edited)</Text>}
         </View>
       );
     }
 
-    // ---- IMAGE ----
-    if (msg.image) {
+    // ---- Image ----
+    if (msg?.image) {
       return (
         <View style={bubbleStyle}>
           {renderReplyPreview()}
           <Image source={{ uri: msg.image }} style={styles.mediaImage} />
+          {msg.edited && <Text style={styles.editedFlag}>(edited)</Text>}
         </View>
       );
     }
 
-    // ---- VIDEO ----
-    if (msg.video) {
+    // ---- Video ----
+    if (msg?.video) {
       return (
         <View style={bubbleStyle}>
           {renderReplyPreview()}
@@ -138,12 +149,13 @@ const ChatMessageBox = ({
             useNativeControls
             resizeMode="contain"
           />
+          {msg.edited && <Text style={styles.editedFlag}>(edited)</Text>}
         </View>
       );
     }
 
-    // ---- AUDIO ----
-    if (msg.audio) {
+    // ---- Audio ----
+    if (msg?.audio) {
       const play = async () => {
         const { sound: s } = await Audio.Sound.createAsync(
           { uri: msg.audio },
@@ -156,17 +168,36 @@ const ChatMessageBox = ({
         <TouchableOpacity style={bubbleStyle} onPress={play}>
           {renderReplyPreview()}
           <Text>▶️ Play Voice Message</Text>
+          {msg.edited && <Text style={styles.editedFlag}>(edited)</Text>}
         </TouchableOpacity>
+      );
+    }
+
+    // ---- Contact ----
+    if (msg?.contact) {
+      return (
+        <View style={bubbleStyle}>
+          {renderReplyPreview()}
+          <View style={styles.contactCard}>
+            <Ionicons name="person-circle-outline" size={32} color="#128C7E" />
+            <View style={{ marginLeft: 8 }}>
+              <Text style={styles.contactName}>
+                {msg.contact?.name || 'Contact'}
+              </Text>
+              <Text style={styles.contactLabel}>Contact Message</Text>
+            </View>
+          </View>
+        </View>
       );
     }
 
     return null;
   };
 
-  // ✅ ALIGNMENT CONTAINER
+  // ✅ Alignment container
   const container = {
-    width: "100%",
-    flexDirection: isMine ? "row-reverse" : "row",
+    width: '100%',
+    flexDirection: isMine ? 'row-reverse' : 'row',
     paddingHorizontal: 8,
     marginVertical: 3,
   };
@@ -179,9 +210,7 @@ const ChatMessageBox = ({
         ref={updateRowRef}
       >
         <TouchableOpacity activeOpacity={0.8} onLongPress={onLongPress}>
-          <View style={container}>
-            {renderMessageBody()}
-          </View>
+          <View style={container}>{renderMessageBody()}</View>
         </TouchableOpacity>
       </Swipeable>
     </GestureHandlerRootView>
@@ -192,51 +221,66 @@ const styles = StyleSheet.create({
   bubble: {
     padding: 8,
     borderRadius: 10,
-    maxWidth: "80%",
+    maxWidth: '80%',
   },
-
   text: {
-    color: "#111",
+    color: '#111',
     fontSize: 16,
   },
-
   mediaImage: {
     width: 230,
     height: 230,
     borderRadius: 8,
   },
-
   video: {
     width: 230,
     height: 230,
     borderRadius: 8,
   },
-
   replySwipe: {
     width: 45,
-    backgroundColor: "#25D366",
-    justifyContent: "center",
-    alignItems: "center",
+    backgroundColor: '#25D366',
+    justifyContent: 'center',
+    alignItems: 'center',
   },
-
-  // ✅ WhatsApp-style inline reply bubble
   replyBubble: {
-    backgroundColor: "#e8e8e8",
-    borderLeftColor: "#25D366",
+    backgroundColor: '#e8e8e8',
+    borderLeftColor: '#25D366',
     borderLeftWidth: 4,
     padding: 6,
     borderRadius: 6,
     marginBottom: 5,
   },
-
   replySender: {
-    fontWeight: "bold",
-    color: "#25D366",
+    fontWeight: 'bold',
+    color: '#25D366',
     fontSize: 13,
   },
-
   replyPreviewText: {
-    color: "#333",
+    color: '#333',
+  },
+  editedFlag: {
+    fontSize: 10,
+    color: 'gray',
+    marginTop: 2,
+    alignSelf: 'flex-end',
+  },
+  contactCard: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: '#f0f0f0',
+    padding: 10,
+    borderRadius: 8,
+    marginTop: 4,
+  },
+  contactName: {
+    fontSize: 16,
+    fontWeight: '600',
+    color: '#128C7E',
+  },
+  contactLabel: {
+    fontSize: 13,
+    color: '#555',
   },
 });
 

@@ -1,4 +1,3 @@
-// File: F:/skyees-game/skyees-project/app/(tabs)/contacts/newCall.tsx
 
 import { View, Text, StyleSheet, Image, TouchableOpacity, ImageBackground, Alert } from 'react-native';
 import React, { useEffect, useRef, useState } from 'react';
@@ -19,20 +18,26 @@ const NewCallScreen = () => {
   const socket = useSocket();
 
   const API_URL = process.env.EXPO_PUBLIC_API_URL;
-  const { name, image, id: receiverId } = useLocalSearchParams<{ name: string; image: string; id: string }>();
+  // ✅ Added 'type' to params
+  const { name, image, id: receiverId, type } = useLocalSearchParams<{ 
+    name: string; 
+    image: string; 
+    id: string; 
+    type: 'video' | 'audio' 
+  }>();
 
-  // ✅ State to manage the status of the call initiation process
   const [status, setStatus] = useState<CallStatus>('initiating');
 
   useEffect(() => {
-    navigation.setOptions({ title: `Calling ${name}...` });
+    // Set header title based on call type
+    const callLabel = type === 'video' ? 'Video calling' : 'Calling';
+    navigation.setOptions({ title: `${callLabel} ${name}...` });
 
     if (status === 'initiating') {
       initiateCall();
     }
 
     const handleCallDeclined = () => {
-      // Only act if the call hasn't already succeeded or failed
       if (status === 'initiating') {
         setStatus('cancelled');
         Alert.alert('Call Declined', `${name} is busy.`);
@@ -49,21 +54,22 @@ const NewCallScreen = () => {
         socket.off('call-declined', handleCallDeclined);
       }
     };
-  }, [status, socket]); // Rerun effect if status changes
+  }, [status, socket]);
 
   const initiateCall = async () => {
     try {
       const token = await getToken();
       if (!user?.id) throw new Error("User not available");
 
-      console.log("📞 Starting call...", { callerId: user.id, receiverId });
+      console.log(`📞 Starting ${type} call...`, { callerId: user.id, receiverId });
 
+      // 1. Create call record on backend
       const res = await axios.post(
         `${API_URL}/api/calls`,
         {
           callerId: user.id,
           receiverId,
-          callType: 'video',
+          callType: type, // ✅ Dynamic type
         },
         { headers: { Authorization: `Bearer ${token}` } }
       );
@@ -71,61 +77,33 @@ const NewCallScreen = () => {
       const call = res.data;
       console.log("✅ Call record created:", call._id);
 
-      // If the component is still in the 'initiating' state, proceed.
-     if (status === 'initiating') {
-        // Navigate immediately with placeholder
-        router.push({
-          pathname: '/(tabs)/calls/Call',
-          params: {
-            callId: 'pending',
-            callerId: String(user.id),
-            callerName: user.fullName || 'Me',
-            receiverId: String(receiverId),
-            type: 'video',
-            isCaller: 'true',
-          },
-        });
-
-        // Then call API
-        const res = await axios.post(`${API_URL}/api/calls`, {
-          callerId: user.id,
-          receiverId,
-          callType: 'video',
-        }, { headers: { Authorization: `Bearer ${token}` } });
-
-        const call = res.data;
-        // Replace with actual callId
+      // 2. Navigate to the actual WebRTC Call screen
+      if (status === 'initiating') {
         router.replace({
           pathname: '/(tabs)/calls/Call',
           params: {
             callId: String(call._id),
-            callerId: String(call.callerId),
+            callerId: String(user.id),
             callerName: user.fullName || 'Me',
-            receiverId: String(call.receiverId),
-            type: String(call.callType),
+            receiverId: String(receiverId),
+            type: type, // ✅ Pass type
             isCaller: 'true',
           },
         });
-  
       }
-
-
     } catch (err: any) {
       if (status === 'initiating') {
-        setStatus('failed'); // Mark as failed
+        setStatus('failed');
         console.error("❌ Failed to start call:", err.response ? err.response.data : err.message);
         Alert.alert('Error', 'Failed to start the call. Please try again.');
-      router.replace('/(tabs)/contacts');
+        router.replace('/(tabs)/contacts');
       }
     }
   };
 
   const onEndCall = () => {
-    // This button cancels the call initiation
     if (status === 'initiating') {
       setStatus('cancelled');
-      // Here you might want to also notify the backend to update the call record to 'missed'
-      // but for simplicity, we just go back.
       console.log(`CALLING SCREEN: Call to ${name} CANCELLED by user.`);
       router.replace('/(tabs)/contacts');
     }
@@ -138,7 +116,9 @@ const NewCallScreen = () => {
           <View style={styles.header}>
             <Image source={{ uri: image }} style={styles.avatar} />
             <Text style={styles.name}>{name}</Text>
-            <Text style={styles.status}>Ringing...</Text>
+            <Text style={styles.status}>
+                {type === 'video' ? 'Video calling...' : 'Voice calling...'}
+            </Text>
           </View>
 
           <View style={styles.buttonContainer}>
@@ -153,7 +133,6 @@ const NewCallScreen = () => {
   );
 };
 
-// ... (Your styles remain the same)
 const styles = StyleSheet.create({
   background: { flex: 1 },
   container: {

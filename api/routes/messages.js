@@ -28,12 +28,8 @@ router.get('/private/:id', clerkAuth, async (req, res) => {
 
     const enriched = messages.map(msg => ({
       ...msg,
-<<<<<<< HEAD
-      senderName: userMap[msg.senderId] || msg.senderId || 'Unknown',
-=======
       senderName: userMap[msg.senderId]?.username || msg.senderId,
       senderPhoto: userMap[msg.senderId]?.profilePic || null,
->>>>>>> origin/main
     }));
     console.log('Fetching messages for Private chat:', enriched);
     res.json(enriched);
