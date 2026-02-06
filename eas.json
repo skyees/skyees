@@ -12,7 +12,8 @@
       "env": {
         "EXPO_PUBLIC_CLERK_PUBLISHABLE_KEY": "pk_live_Y2xlcmsuc2t5ZWVzLmNvbSQ",
         "EXPO_PUBLIC_API_URL": "https://skyees.com",
-        "EXPO_PUBLIC_SERVER_URL": "https://skyees.com/api"
+        "EXPO_PUBLIC_FCM_PROJECT_ID": "skyees7777",
+        "EXPO_PUBLIC_SERVER_URL": "https://skyees.com/pyapi"
       }
     },
     "development": {
@@ -24,7 +25,8 @@
       "env": {
         "EXPO_PUBLIC_CLERK_PUBLISHABLE_KEY": "pk_live_Y2xlcmsuc2t5ZWVzLmNvbSQ",
         "EXPO_PUBLIC_API_URL": "https://skyees.com",
-        "EXPO_PUBLIC_SERVER_URL": "https://skyees.com/api"
+        "EXPO_PUBLIC_FCM_PROJECT_ID": "skyees7777",
+        "EXPO_PUBLIC_SERVER_URL": "https://skyees.com/pyapi"
       }
     },
     "production": {
@@ -32,7 +34,8 @@
       "env": {
         "EXPO_PUBLIC_CLERK_PUBLISHABLE_KEY": "pk_live_Y2xlcmsuc2t5ZWVzLmNvbSQ",
         "EXPO_PUBLIC_API_URL": "https://skyees.com",
-        "EXPO_PUBLIC_SERVER_URL": "https://skyees.com/api"
+        "EXPO_PUBLIC_FCM_PROJECT_ID": "skyees7777",
+        "EXPO_PUBLIC_SERVER_URL": "https://skyees.com/pyapi"
       }
     }
   },

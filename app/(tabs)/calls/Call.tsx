@@ -1,7 +1,11 @@
 import React, { useEffect, useState, useRef } from "react";
-import { View, Text, TouchableOpacity, StyleSheet, SafeAreaView } from "react-native";
-import { Ionicons } from "@expo/vector-icons";
-import { useLocalSearchParams, useRouter } from "expo-router";
+import {
+  View, Text, TouchableOpacity, StyleSheet, Image,
+  ActivityIndicator, Dimensions, Animated, StatusBar,
+  ImageBackground, Easing
+} from "react-native";
+import { Ionicons, MaterialCommunityIcons } from "@expo/vector-icons";
+import { useLocalSearchParams, useRouter, useNavigation } from "expo-router";
 import {
   RTCView,
   mediaDevices,
@@ -10,379 +14,318 @@ import {
   RTCIceCandidate,
 } from "react-native-webrtc";
 import axios from "axios";
-import Colors from "@/constants/Colors";
-import { useAuth } from "@clerk/clerk-expo";
+import { useAuth, useUser } from "@clerk/clerk-expo";
 import useSocket from "@/utils/socket";
+import { BlurView } from "expo-blur";
+import InCallManager from "react-native-incall-manager";
+
+const { width, height } = Dimensions.get("window");
 
 const configuration = {
   iceServers: [
     { urls: "stun:stun.l.google.com:19302" },
     { urls: "stun:stun1.l.google.com:19302" },
-    { urls: "stun:stun2.l.google.com:19302" },
   ],
 };
 
-const CallScreen = () => {
-  const { callId, callerId, receiverId, callerName, type, isCaller = "false" } =
-    useLocalSearchParams<{
-      callId: string;
-      callerId: string;
-      receiverId: string;
-      callerName: string;
-      type: "video" | "audio";
-      isCaller: "true" | "false";
-    }>();
+let globalPC: RTCPeerConnection | null = null;
+let globalLocalStream: any = null;
+
+export default function CallScreen() {
+  const params = useLocalSearchParams();
+  const { callId, callerId, receiverId, type: initialType, image, callerName } = params;
+  const isCaller = params.isCaller === "true";
 
   const router = useRouter();
+  const navigation = useNavigation();
+  const { user } = useUser();
   const { getToken } = useAuth();
   const socket = useSocket();
   const API_URL = process.env.EXPO_PUBLIC_API_URL;
 
+  const targetId = isCaller ? receiverId : callerId;
+
   const [localStreamUrl, setLocalStreamUrl] = useState<string | null>(null);
   const [remoteStreamUrl, setRemoteStreamUrl] = useState<string | null>(null);
-  const [connected, setConnected] = useState(false);
-
-  const pcRef = useRef<RTCPeerConnection | null>(null);
-  const localStreamRef = useRef<MediaStream | null>(null);
-  const remoteStreamRef = useRef<MediaStream | null>(null);
-  const iceCandidateQueue = useRef<RTCIceCandidate[]>([]);
-  const isEndingCall = useRef(false);
+  const [connectionStatus, setConnectionStatus] = useState(isCaller ? "Calling..." : "Ringing...");
   const [isLocalBig, setIsLocalBig] = useState(false);
-
-
-  useEffect(() => {
-    if (!socket || !callId || !callerId || !receiverId) return;
-
-    console.log("🎬 Initializing WebRTC setup...");
-    console.log("🔍 Role:", isCaller === "true" ? "Caller" : "Receiver");
-    console.log("📡 Socket ID:", socket.id);
-
-    const pc = new RTCPeerConnection(configuration);
-    pcRef.current = pc;
-
-    if (isCaller === "false") {
-      console.log("📡 Registering offer listener (receiver only)");
-      socket.on("offer", async ({ offer }) => {
-        console.log("📩 Offer received from caller");
-        await pc.setRemoteDescription(new RTCSessionDescription(offer));
-        console.log("📡 Remote description set (offer)");
-        await flushIceQueue(pc);
-        console.log("🧊 ICE queue flushed after offer");
-        const answer = await pc.createAnswer();
-        console.log("📡 Answer created");
-        await pc.setLocalDescription(answer);
-        console.log("📡 Local description set (answer)");
-        socket.emit("answer", { answer, callId, to: callerId });
-        console.log("📡 Answer emitted to caller");
-      });
-
-      console.log("🙋 Receiver signaling ready");
-      socket.emit("receiver-ready", { callId, to: callerId });
-      console.log("📡 receiver-ready emitted to caller");
-    }
-
-
-
-    if (isCaller === "true") {
-      console.log("📡 Registering receiver-ready listener (caller only)");
-    socket.on("receiver-ready", async ({ callId: readyId }) => {
-    if (readyId !== callId) return;
-    console.log("✅ Receiver ready — waiting for local media...");
-    const waitForLocalStream = async () => {
-     let retries = 0;
-     while (
-       (!localStreamRef.current || localStreamRef.current.getVideoTracks().length === 0) &&
-       retries < 50
-     ) {
-       await new Promise((r) => setTimeout(r, 100));
-       retries++;
-     }
-     if (retries >= 50) {
-       console.warn("⚠️ Local media not ready — skipping offer");
-       return false;
-     }
-     return true;
-   };
-
-   const ready = await waitForLocalStream();
-   if (!ready) return;
-
-
-    const offer = await pc.createOffer();
-    await pc.setLocalDescription(offer);
-    socket.emit("offer", { offer, callId, to: receiverId });
-  });
-
-      socket.on("answer", async ({ answer }) => {
-        console.log("📩 Answer received from receiver");
-        await pc.setRemoteDescription(new RTCSessionDescription(answer));
-        console.log("📡 Remote description set (answer)");
-        await flushIceQueue(pc);
-        console.log("🧊 ICE queue flushed after answer");
-      });
-    }
-
-    socket.on("ice-candidate", async ({ candidate }) => {
-      console.log("🧊 ICE candidate received");
-      const ice = new RTCIceCandidate(candidate);
-      if (pc.remoteDescription) {
-        await pc.addIceCandidate(ice).catch((e) => console.error("⚠️ addIceCandidate error:", e));
-        console.log("🧊 ICE candidate added");
-      } else {
-        console.log("🧊 Remote not ready, queueing ICE candidate");
-        iceCandidateQueue.current.push(ice);
-      }
-    });
-
-    pc.onicecandidate = (event) => {
-      if (event.candidate) {
-        const targetId = isCaller === "true" ? receiverId : callerId;
-        console.log("🧊 Emitting ICE candidate to", targetId);
-        socket.emit("ice-candidate", { callId, to: targetId, candidate: event.candidate });
-      }
-    };
-
-    pc.ontrack = (event) => {
-      console.log("📡 ontrack fired");
-      if (event.streams && event.streams[0]) {
-        const remoteStream = event.streams[0];
-        remoteStreamRef.current = remoteStream;
-        setRemoteStreamUrl(remoteStream.toURL());
-        console.log("📡 Remote stream set");
-
-        console.log("🔍 Remote stream tracks:", remoteStream.getTracks());
-        console.log("🔍 Remote video tracks:", remoteStream.getVideoTracks());
-        console.log("🔊 Remote audio tracks:", remoteStream.getAudioTracks());
-        remoteStream.getAudioTracks().forEach((track) => {
-          console.log(`🔊 Audio track | enabled: ${track.enabled} | muted: ${track.muted} | state: ${track.readyState}`);
-        });
-        remoteStream.getVideoTracks().forEach((track) => {
-          console.log(`🎥 Remote video track | enabled: ${track.enabled} | state: ${track.readyState}`);
-        });
-      }
-    };
-
-    pc.onconnectionstatechange = () => {
-      console.log("🔗 Connection state changed:", pc.connectionState);
-      if (pc.connectionState === "connected") {
-        setConnected(true);
-        console.log("✅ Peer connection established");
-      }
-      if (["failed", "disconnected", "closed"].includes(pc.connectionState)) {
-        console.log("⚠️ Peer connection lost — ending call");
-        endCall();
-      }
-    };
-
-    (async () => {
-      console.log("🎥 Getting user media...");
-      const localStream = await mediaDevices.getUserMedia({
-        audio: true,
-        video: type === "video",
-      });
-
-      localStreamRef.current = localStream;
-      setLocalStreamUrl(localStream.toURL());
-      console.log("🎥 Local stream set");
-
-      localStream.getTracks().forEach((track) => {
-        pc.addTrack(track, localStream);
-        console.log(`🎥 Track added: ${track.kind} | enabled: ${track.enabled} | state: ${track.readyState}`);
-      });
-
-      console.log("🔍 Local stream tracks:", localStream.getTracks());
-      console.log("🔍 Local video tracks:", localStream.getVideoTracks());
-
-      if (isCaller === "true") {
-        console.log("📞 Caller waiting for receiver...");
-      }
-    })();
-
-    return () => {
-      console.log("🧹 Cleaning up WebRTC and socket listeners");
-      socket.off("receiver-ready");
-      socket.off("offer");
-      socket.off("answer");
-      socket.off("ice-candidate");
-      pc.close();
-    };
-  }, [socket, callId]);
-
   const [isMuted, setIsMuted] = useState(false);
 
-  const toggleMute = () => {
-    const audioTracks = localStreamRef.current?.getAudioTracks();
-    if (audioTracks && audioTracks.length > 0) {
-      audioTracks[0].enabled = !audioTracks[0].enabled;
-      setIsMuted(!audioTracks[0].enabled);
-      console.log(`🎙️ Microphone ${audioTracks[0].enabled ? "unmuted" : "muted"}`);
+  const [callType, setCallType] = useState(initialType);
+  const [isCameraOff, setIsCameraOff] = useState(initialType === "audio");
+  const [audioOutput, setAudioOutput] = useState<'speaker'|'earpiece'>(
+    initialType === "video" ? "speaker" : "earpiece"
+  );
+
+  const controlsAnim = useRef(new Animated.Value(150)).current;
+  const statusAnim = useRef(new Animated.Value(-120)).current;
+  const screenOpacity = useRef(new Animated.Value(0)).current;
+
+  const localStreamRef = useRef<any>(null);
+  const iceQueue = useRef<RTCIceCandidate[]>([]);
+  const hasHungUp = useRef(false);
+
+  // ---------- 1. ULTIMATE STACK CLEAR ----------
+  const navigateBack = () => {
+    const parent = navigation.getParent();
+    parent?.setOptions({ tabBarStyle: { display: "flex" }, headerShown: true });
+    
+    // Clear navigation history and reset to tabs
+    if (router.canDismiss()) {
+        router.dismissAll();
     }
-  };
-
-const swapViews = () => {
-  setIsLocalBig((prev) => !prev);
-};
-
-
-
-  const flushIceQueue = async (pc: RTCPeerConnection) => {
-    while (iceCandidateQueue.current.length && pc.remoteDescription) {
-      const ice = iceCandidateQueue.current.shift();
-      if (ice) await pc.addIceCandidate(ice).catch((e) => console.error(e));
-    }
-  };
-
-  const endCall = async () => {
-    if (isEndingCall.current) return;
-    isEndingCall.current = true;
-    console.log("📞 Ending call...");
-
-    pcRef.current?.close();
-    localStreamRef.current?.getTracks().forEach((t) => t.stop());
-    remoteStreamRef.current?.getTracks().forEach((t) => t.stop());
-
-    const token = await getToken();
-    const targetId = isCaller === "true" ? receiverId : callerId;
-    socket.emit("call-end", { callId, to: targetId });
-
-    await axios.put(
-      `${API_URL}/api/calls/end`,
-      { callId, status: "ended" },
-      { headers: { Authorization: `Bearer ${token}` } }
-    );
-    router.replace('/(tabs)/contacts');
     router.replace("/(tabs)/calls");
   };
 
+  const hangup = async () => {
+    if (hasHungUp.current) return;
+    hasHungUp.current = true;
 
- return (
-   <SafeAreaView style={styles.container}>
-     {type === "video" ? (
-       <View style={styles.videoContainer}>
-         {(remoteStreamUrl || localStreamUrl) ? (
-           <>
-             {/* Fullscreen video */}
-             <TouchableOpacity style={styles.fullscreenWrapper} onPress={swapViews}>
-               <RTCView
-                 streamURL={isLocalBig ? localStreamUrl : remoteStreamUrl}
-                 style={styles.fullscreenVideo}
-                 objectFit="cover"
-                 mirror={isLocalBig}
-               />
-             </TouchableOpacity>
+    if (globalPC) {
+      globalPC.ontrack = null;
+      globalPC.onicecandidate = null;
+      globalPC.close();
+      globalPC = null;
+    }
+    if (globalLocalStream) {
+      globalLocalStream.getTracks().forEach((t: any) => t.stop());
+      globalLocalStream = null;
+    }
+    localStreamRef.current = null;
 
-             {/* PiP video */}
-             <TouchableOpacity style={styles.pipWrapper} onPress={swapViews}>
-               <RTCView
-                 streamURL={isLocalBig ? remoteStreamUrl : localStreamUrl}
-                 style={styles.pipVideo}
-                 objectFit="cover"
-                 mirror={!isLocalBig}
-               />
-             </TouchableOpacity>
-           </>
-         ) : (
-           <View style={styles.waiting}>
-             <Text style={{ color: "#fff" }}>
-               {connected ? "Starting..." : `Connecting with ${callerName}...`}
-             </Text>
-           </View>
-         )}
-       </View>
-     ) : (
-       <View style={styles.audioContainer}>
-         <Text style={styles.audioText}>
-           {connected ? `Voice Call with ${callerName}` : `Connecting with ${callerName}...`}
-         </Text>
-       </View>
-     )}
+    socket?.emit("call-end", { callId, to: targetId });
+    InCallManager.stop();
+    navigateBack();
+  };
 
-     <View style={styles.controls}>
-       <TouchableOpacity
-         style={[styles.controlBtn, { backgroundColor: isMuted ? "#888" : Colors.primary }]}
-         onPress={toggleMute}
-       >
-         <Ionicons name={isMuted ? "mic-off" : "mic"} size={30} color="white" />
-       </TouchableOpacity>
+  // ---------- 2. HARDWARE & TRANSITION ----------
+  useEffect(() => {
+    const parent = navigation.getParent();
+    parent?.setOptions({ tabBarStyle: { display: "none" }, headerShown: false });
 
-       <TouchableOpacity
-         style={[styles.controlBtn, { backgroundColor: Colors.red }]}
-         onPress={endCall}
-       >
-         <Ionicons name="call" size={30} color="white" />
-       </TouchableOpacity>
-     </View>
-   </SafeAreaView>
- );
+    // 🔊 VOICE FIX: Always start with 'audio' to activate Mic hardware
+    InCallManager.start({ media: 'audio' });
+    InCallManager.setForceSpeakerphoneOn(callType === "video");
+    InCallManager.setKeepScreenOn(true);
 
+    Animated.parallel([
+      Animated.timing(screenOpacity, { toValue: 1, duration: 300, useNativeDriver: true }),
+      Animated.spring(controlsAnim, { toValue: 0, useNativeDriver: true, friction: 8 }),
+      Animated.spring(statusAnim, { toValue: 0, useNativeDriver: true, friction: 8 }),
+    ]).start();
+
+    return () => {
+      InCallManager.stop();
+      parent?.setOptions({ tabBarStyle: { display: "flex" }, headerShown: true });
+    };
+  }, []);
+
+  // ---------- 3. SIGNALING ----------
+  useEffect(() => {
+    if (!socket || !user?.id) return;
+
+    const start = async () => {
+      try {
+        socket.emit("register", user.id);
+        const stream = await mediaDevices.getUserMedia({
+          audio: true,
+          video: { width: 1280, height: 720, frameRate: 30, facingMode: "user" },
+        });
+
+        if (initialType === "audio") stream.getVideoTracks().forEach(t => t.enabled = false);
+
+        globalLocalStream = stream;
+        localStreamRef.current = stream;
+        setLocalStreamUrl(stream.toURL());
+
+        const pc = new RTCPeerConnection(configuration);
+        globalPC = pc;
+        stream.getTracks().forEach(t => pc.addTrack(t, stream));
+
+        // 🚨 REMOTE STREAM FIX: Capture stream instantly
+        pc.ontrack = e => {
+          if (e.streams && e.streams[0]) {
+            setRemoteStreamUrl(e.streams[0].toURL());
+          }
+        };
+
+        pc.onicecandidate = e => {
+          if (e.candidate) socket.emit("ice-candidate", { callId, to: targetId, candidate: e.candidate });
+        };
+
+        pc.onconnectionstatechange = () => {
+          setConnectionStatus(pc.connectionState);
+          if (pc.connectionState === "connected") {
+            Animated.timing(statusAnim, { toValue: -150, duration: 500, useNativeDriver: true }).start();
+          }
+        };
+
+        socket.on("offer", async ({ offer }) => {
+          if (pc.signalingState !== "stable") return;
+          await pc.setRemoteDescription(new RTCSessionDescription(offer));
+          const answer = await pc.createAnswer();
+          await pc.setLocalDescription(answer);
+          socket.emit("answer", { answer, callId, to: targetId });
+          while (iceQueue.current.length) await pc.addIceCandidate(iceQueue.current.shift()!);
+        });
+
+        socket.on("answer", async ({ answer }) => {
+          await pc.setRemoteDescription(new RTCSessionDescription(answer));
+          while (iceQueue.current.length) await pc.addIceCandidate(iceQueue.current.shift()!);
+        });
+
+        socket.on("ice-candidate", async ({ candidate }) => {
+          const ice = new RTCIceCandidate(candidate);
+          if (pc.remoteDescription) await pc.addIceCandidate(ice);
+          else iceQueue.current.push(ice);
+        });
+
+        socket.on("call-ended", hangup);
+
+        if (isCaller) {
+          const offer = await pc.createOffer();
+          await pc.setLocalDescription(offer);
+          socket.emit("offer", { callId, offer, to: targetId });
+        }
+      } catch { hangup(); }
+    };
+
+    start();
+    return () => {
+      socket.off("offer"); socket.off("answer");
+      socket.off("ice-candidate"); socket.off("call-ended");
+    };
+  }, [callId]);
+
+  // ---------- 4. BUTTONS ----------
+  const toggleMute = () => {
+    if (localStreamRef.current) {
+      const t = localStreamRef.current.getAudioTracks()[0];
+      if (t) { t.enabled = !t.enabled; setIsMuted(!t.enabled); }
+    }
+  };
+
+  const toggleCamera = () => {
+    if (localStreamRef.current) {
+      const t = localStreamRef.current.getVideoTracks()[0];
+      if (t) {
+        t.enabled = !t.enabled;
+        setIsCameraOff(!t.enabled);
+        setCallType(t.enabled ? "video" : "audio");
+        InCallManager.setForceSpeakerphoneOn(t.enabled);
+      }
+    }
+  };
+
+  const toggleAudioOutput = () => {
+    const next = audioOutput === "speaker" ? "earpiece" : "speaker";
+    setAudioOutput(next);
+    InCallManager.setForceSpeakerphoneOn(next === "speaker");
+    InCallManager.setSpeakerphoneOn(next === "speaker");
+  };
+
+  const avatarUri = (image && typeof image === "string" && image.trim() !== "" && image !== "null")
+    ? { uri: image }
+    : require("@/assets/images/user-default.jpg");
+
+  return (
+    <Animated.View style={[styles.container, { opacity: screenOpacity }]}>
+      <StatusBar hidden />
+      <ImageBackground source={avatarUri} style={StyleSheet.absoluteFill} blurRadius={80}>
+        <BlurView intensity={25} tint="dark" style={StyleSheet.absoluteFill} />
+      </ImageBackground>
+
+      <View style={styles.mainArea}>
+        {callType === "video" ? (
+          <View style={styles.videoContainer}>
+            {remoteStreamUrl ? (
+              <TouchableOpacity style={styles.fullscreenWrapper} onPress={() => setIsLocalBig(!isLocalBig)} activeOpacity={1}>
+                <RTCView
+                  streamURL={isLocalBig ? localStreamUrl! : remoteStreamUrl}
+                  style={styles.fullscreen}
+                  objectFit="cover"
+                  mirror={isLocalBig}
+                  zOrder={0}
+                />
+              </TouchableOpacity>
+            ) : (
+              <View style={styles.centerInfo}>
+                <Image source={avatarUri} style={styles.avatarLarge} />
+                <Text style={styles.nameText}>{callerName}</Text>
+                <ActivityIndicator color="#fff" style={{marginTop: 20}} />
+              </View>
+            )}
+
+            {localStreamUrl && (
+              <TouchableOpacity style={styles.pipWrapper} onPress={() => setIsLocalBig(!isLocalBig)}>
+                <RTCView
+                  streamURL={isLocalBig ? remoteStreamUrl! : localStreamUrl}
+                  style={styles.pipVideo}
+                  objectFit="cover"
+                  mirror={!isLocalBig}
+                  zOrder={1}
+                />
+              </TouchableOpacity>
+            )}
+          </View>
+        ) : (
+          <View style={styles.audioContainer}>
+            <View style={styles.avatarRing}><Image source={avatarUri} style={styles.avatarLarge} /></View>
+            <Text style={styles.callerNameText}>{callerName}</Text>
+            <Text style={styles.audioStatusText}>{connectionStatus}</Text>
+          </View>
+        )}
+      </View>
+
+      <Animated.View style={[styles.statusPill, { transform: [{ translateY: statusAnim }] }]}>
+        <BlurView intensity={30} tint="dark" style={styles.statusPillInner}>
+          <View style={[styles.statusDot, { backgroundColor: connectionStatus === "connected" ? "#34C759" : "#FF9F0A" }]} />
+          <Text style={styles.statusPillText}>{connectionStatus}</Text>
+        </BlurView>
+      </Animated.View>
+
+      <Animated.View style={[styles.controlsContainer, { transform: [{ translateY: controlsAnim }] }]}>
+        <BlurView intensity={45} tint="dark" style={styles.controlsDock}>
+          <TouchableOpacity onPress={toggleAudioOutput} style={[styles.controlBtn, audioOutput === "speaker" && styles.btnActive]}>
+            <Ionicons name={audioOutput === "speaker" ? "volume-high" : "phone-portrait-outline"} size={24} color={audioOutput === "speaker" ? "#000" : "#fff"} />
+          </TouchableOpacity>
+          <TouchableOpacity onPress={toggleCamera} style={[styles.controlBtn, !isCameraOff && styles.btnActive]}>
+            <Ionicons name={isCameraOff ? "videocam-off" : "videocam"} size={26} color={!isCameraOff ? "#000" : "#fff"} />
+          </TouchableOpacity>
+          <TouchableOpacity onPress={toggleMute} style={[styles.controlBtn, isMuted && styles.btnActive]}>
+            <Ionicons name={isMuted ? "mic-off" : "mic"} size={26} color={isMuted ? "#000" : "#fff"} />
+          </TouchableOpacity>
+          <TouchableOpacity onPress={hangup} style={[styles.controlBtn, styles.btnEnd]}>
+            <MaterialCommunityIcons name="phone-hangup" size={30} color="#fff" />
+          </TouchableOpacity>
+        </BlurView>
+      </Animated.View>
+    </Animated.View>
+  );
 }
 
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: "#000" },
-  videoContainer: { flex: 1, justifyContent: "center", alignItems: "center" },
-  remoteVideo: { width: "100%", height: "100%" },
-    videoContainer: {
-      flex: 1,
-      backgroundColor: "#000",
-    },
-    fullscreenWrapper: {
-      flex: 1,
-    },
-    fullscreenVideo: {
-      width: "100%",
-      height: "100%",
-    },
-    pipWrapper: {
-      position: "absolute",
-      bottom: 100,
-      right: 20,
-      width: 120,
-      height: 180,
-      borderRadius: 12,
-      overflow: "hidden",
-      borderWidth: 2,
-      borderColor: "#fff",
-      elevation: 10,
-      backgroundColor: "#000",
-    },
-    pipVideo: {
-      width: "100%",
-      height: "100%",
-    },
-   localVideo: {
-    width: 120,
-    height: 180,
-    position: "absolute",
-    bottom: 120,
-    right: 20,
-    borderRadius: 12,
-    overflow: "hidden",
-    borderWidth: 2,
-    borderColor: Colors.primary,
-  },
-  waiting: { flex: 1, justifyContent: "center", alignItems: "center" },
-  controls: {
-    position: "absolute",
-    bottom: 40,
-    left: 0,
-    right: 0,
-    flexDirection: "row",
-    justifyContent: "center",
-  },
-  controlBtn: {
-    width: 70,
-    height: 70,
-    borderRadius: 35,
-    justifyContent: "center",
-    alignItems: "center",
-  },
-  audioContainer: {
-    flex: 1,
-    alignItems: "center",
-    justifyContent: "center",
-    backgroundColor: Colors.background,
-  },
-  audioText: { color: "#fff", fontSize: 20 },
+  mainArea: { flex: 1 },
+  videoContainer: { flex: 1 },
+  fullscreenWrapper: { flex: 1 },
+  fullscreen: { width: "100%", height: "100%", backgroundColor: "#121212" },
+  centerInfo: { flex: 1, justifyContent: "center", alignItems: "center" },
+  avatarLarge: { width: 135, height: 135, borderRadius: 68, borderWidth: 3, borderColor: "rgba(255,255,255,0.2)" },
+  nameText: { color: "#fff", fontSize: 32, fontWeight: "700", marginTop: 25 },
+  pipWrapper: { position: "absolute", top: 50, right: 15, width: 110, height: 160, borderRadius: 20, overflow: "hidden", borderWidth: 1, borderColor: "rgba(255,255,255,0.2)", backgroundColor: "#333" },
+  pipVideo: { width: "100%", height: "100%" },
+  audioContainer: { flex: 1, justifyContent: "center", alignItems: "center" },
+  avatarRing: { padding: 5, borderRadius: 100, borderWidth: 2, borderColor: "rgba(255,255,255,0.15)", marginBottom: 25 },
+  callerNameText: { color: "#fff", fontSize: 32, fontWeight: "700" },
+  audioStatusText: { color: "rgba(255,255,255,0.5)", fontSize: 15, marginTop: 10, textTransform: "uppercase" },
+  statusPill: { position: "absolute", top: 50, alignSelf: "center" },
+  statusPillInner: { flexDirection: "row", alignItems: "center", paddingHorizontal: 16, paddingVertical: 8, borderRadius: 25, overflow: "hidden" },
+  statusDot: { width: 6, height: 6, borderRadius: 3, marginRight: 8 },
+  statusPillText: { color: "#fff", fontSize: 13, fontWeight: "600" },
+  controlsContainer: { position: "absolute", bottom: 40, width: "100%", alignItems: "center" },
+  controlsDock: { flexDirection: "row", backgroundColor: "rgba(20,20,20,0.4)", borderRadius: 40, paddingVertical: 12, paddingHorizontal: 25, gap: 20 },
+  controlBtn: { width: 56, height: 56, borderRadius: 28, justifyContent: "center", alignItems: "center", backgroundColor: "rgba(255,255,255,0.15)" },
+  btnActive: { backgroundColor: "#fff" },
+  btnEnd: { backgroundColor: "#FF3B30", width: 68, height: 56, borderRadius: 28 }
 });
-
-export default CallScreen;

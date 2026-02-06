@@ -1,0 +1,16 @@
+# Core framework
+fastapi==0.115.0
+uvicorn==0.32.0
+gunicorn==21.2.0
+
+# Database (MongoDB async driver)
+motor==3.6.0
+
+# Realtime communication
+python-socketio[asyncio]==5.11.2
+
+# Authentication (Clerk integration)
+fastapi-clerk-auth==0.1.4
+
+# Common utilities
+requests==2.31.0

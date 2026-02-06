@@ -112,9 +112,9 @@ android {
     namespace 'com.goboss.skyees'
     defaultConfig {
         applicationId 'com.goboss.skyees'
-        minSdkVersion 24
-        targetSdkVersion 34
-        versionCode 1
+        minSdkVersion rootProject.ext.minSdkVersion
+        targetSdkVersion rootProject.ext.targetSdkVersion
+        versionCode 9
         versionName "1.0.0"
     }
     signingConfigs {

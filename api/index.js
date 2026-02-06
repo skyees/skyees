@@ -14,6 +14,7 @@ const myroomRoutes = require("./routes/rooms");
 const callsRoutesFactory = require("./routes/calls");
 const paymentRouter = require('./routes/payment');
 
+
 const { ClerkExpressRequireAuth } = require('@clerk/clerk-sdk-node');
 
 
@@ -48,6 +49,7 @@ app.use("/api/messages", messageRoutes);
 app.use("/api/rooms", myroomRoutes);
 app.use('/api/payments', paymentRouter);
 
+
 // DB + start
 mongoose.connect(process.env.MONGO_URI)
   .then(() => {
@@ -73,7 +75,6 @@ io.on("connection", (socket) => {
       console.error('⚠️ register handler error', e);
     }
   });
-
 
 
   // ========= 🧩 EXISTING CHAT LOGIC (Unchanged) =========
@@ -245,6 +246,22 @@ io.on("connection", (socket) => {
         }
       }
     });
+
+
+socket.on("react-message", async ({ messageId, emoji, userId, roomId }) => {
+  await Message.findByIdAndUpdate(messageId, { $pull: { reactions: { userId } } });
+  const updated = await Message.findByIdAndUpdate(
+    messageId,
+    { $push: { reactions: { userId, emoji, reactedAt: new Date() } } },
+    { new: true }
+  );
+
+  if (roomId) {
+    io.to(roomId).emit("message-updated", updated);
+  } else {
+    io.emit("message-updated", updated);
+  }
+});
 
     socket.on("stop-typing", ({ senderId, receiverId, roomId }) => {
       if (roomId) {

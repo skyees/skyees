@@ -1,14 +1,30 @@
-
-import { View, Text, StyleSheet, Image, TouchableOpacity, ImageBackground, Alert } from 'react-native';
-import React, { useEffect, useRef, useState } from 'react';
+import React, { useEffect, useState, useRef } from 'react';
+import {
+  View,
+  Text,
+  StyleSheet,
+  Image,
+  TouchableOpacity,
+  ImageBackground,
+  StatusBar
+} from 'react-native';
 import { useLocalSearchParams, useRouter, useNavigation } from 'expo-router';
-import { Ionicons } from '@expo/vector-icons';
+import { MaterialIcons } from '@expo/vector-icons';
 import { BlurView } from 'expo-blur';
 import axios from 'axios';
 import { useAuth, useUser } from '@clerk/clerk-expo';
 import useSocket from '@/utils/socket';
-
-type CallStatus = 'initiating' | 'success' | 'failed' | 'cancelled';
+import Animated, {
+  useSharedValue,
+  useAnimatedStyle,
+  withRepeat,
+  withTiming,
+  withSequence,
+  FadeIn,
+  Easing,
+  withSpring
+} from 'react-native-reanimated';
+import InCallManager from 'react-native-incall-manager';
 
 const NewCallScreen = () => {
   const { user } = useUser();
@@ -16,171 +32,174 @@ const NewCallScreen = () => {
   const navigation = useNavigation();
   const { getToken } = useAuth();
   const socket = useSocket();
-
   const API_URL = process.env.EXPO_PUBLIC_API_URL;
-  // ✅ Added 'type' to params
-  const { name, image, id: receiverId, type } = useLocalSearchParams<{ 
-    name: string; 
-    image: string; 
-    id: string; 
-    type: 'video' | 'audio' 
-  }>();
 
-  const [status, setStatus] = useState<CallStatus>('initiating');
+  const { name, image, id: receiverId, type, origin } = useLocalSearchParams();
+  const isNavigating = useRef(false);
+  const callIdRef = useRef<string | null>(null);
 
+  // Animation values
+  const ringScale = useSharedValue(1);
+  const ringOpacity = useSharedValue(0.5);
+  const screenOpacity = useSharedValue(0);
+  const screenScale = useSharedValue(0.96);
+
+  const avatarSource = image && typeof image === 'string' && image.trim().length > 5
+    ? { uri: image }
+    : require("@/assets/images/user-default.jpg");
+
+  // ---------- 1. CLEAN NAVIGATION HELPER ----------
+  const handleFinalExit = (target: string | object) => {
+    const parent = navigation.getParent();
+    // Force reset Tab Bar BEFORE we move to prevent white screen flicker
+    parent?.setOptions({ tabBarStyle: { display: "flex" } });
+
+    // Use replace once to prevent stack confusion
+    router.replace(target as any);
+  };
+
+  // ---------- 2. ENTRY & HARDWARE ----------
   useEffect(() => {
-    // Set header title based on call type
-    const callLabel = type === 'video' ? 'Video calling' : 'Calling';
-    navigation.setOptions({ title: `${callLabel} ${name}...` });
+    navigation.setOptions({ headerShown: false });
+    const parent = navigation.getParent();
+    parent?.setOptions({ tabBarStyle: { display: "none" } });
 
-    if (status === 'initiating') {
-      initiateCall();
-    }
+    InCallManager.start({
+      media: type === 'video' ? 'video' : 'audio',
+      ringback: '_BUNDLE_'
+    });
 
-    const handleCallDeclined = () => {
-      if (status === 'initiating') {
-        setStatus('cancelled');
-        Alert.alert('Call Declined', `${name} is busy.`);
-        router.back();
-      }
-    };
+    screenOpacity.value = withTiming(1, { duration: 400 });
+    screenScale.value = withSpring(1, { damping: 15, stiffness: 100 });
 
-    if (socket) {
-      socket.on('call-declined', handleCallDeclined);
-    }
+    ringScale.value = withRepeat(
+      withSequence(
+        withTiming(1.4, { duration: 1500, easing: Easing.out(Easing.quad) }),
+        withTiming(1, { duration: 0 })
+      ), -1, false
+    );
+
+    ringOpacity.value = withRepeat(
+      withSequence(
+        withTiming(0, { duration: 1500 }),
+        withTiming(0.5, { duration: 0 })
+      ), -1, false
+    );
 
     return () => {
-      if (socket) {
-        socket.off('call-declined', handleCallDeclined);
-      }
+      InCallManager.stopRingback();
+      InCallManager.stop();
+      parent?.setOptions({ tabBarStyle: { display: "flex" } });
     };
-  }, [status, socket]);
+  }, []);
 
-  const initiateCall = async () => {
-    try {
-      const token = await getToken();
-      if (!user?.id) throw new Error("User not available");
+  const screenAnimStyle = useAnimatedStyle(() => ({
+    opacity: screenOpacity.value,
+    transform: [{ scale: screenScale.value }]
+  }));
 
-      console.log(`📞 Starting ${type} call...`, { callerId: user.id, receiverId });
+  const animatedRingStyle = useAnimatedStyle(() => ({
+    transform: [{ scale: ringScale.value }],
+    opacity: ringOpacity.value
+  }));
 
-      // 1. Create call record on backend
-      const res = await axios.post(
-        `${API_URL}/api/calls`,
-        {
-          callerId: user.id,
-          receiverId,
-          callType: type, // ✅ Dynamic type
-        },
-        { headers: { Authorization: `Bearer ${token}` } }
-      );
+  // ---------- 3. STABLE EXIT FUNCTION ----------
+  const safeClose = () => {
+    if (isNavigating.current) return;
+    isNavigating.current = true;
 
-      const call = res.data;
-      console.log("✅ Call record created:", call._id);
-
-      // 2. Navigate to the actual WebRTC Call screen
-      if (status === 'initiating') {
-        router.replace({
-          pathname: '/(tabs)/calls/Call',
-          params: {
-            callId: String(call._id),
-            callerId: String(user.id),
-            callerName: user.fullName || 'Me',
-            receiverId: String(receiverId),
-            type: type, // ✅ Pass type
-            isCaller: 'true',
-          },
-        });
-      }
-    } catch (err: any) {
-      if (status === 'initiating') {
-        setStatus('failed');
-        console.error("❌ Failed to start call:", err.response ? err.response.data : err.message);
-        Alert.alert('Error', 'Failed to start the call. Please try again.');
-        router.replace('/(tabs)/contacts');
-      }
-    }
+    InCallManager.stop();
+    
+    // Animate out and then navigate on completion
+    screenOpacity.value = withTiming(0, { duration: 250 }, () => {
+        // We move the logic to a direct call to handle the transition safely
+        setTimeout(() => handleFinalExit('/(tabs)/contacts'), 50);
+    });
   };
 
-  const onEndCall = () => {
-    if (status === 'initiating') {
-      setStatus('cancelled');
-      console.log(`CALLING SCREEN: Call to ${name} CANCELLED by user.`);
-      router.replace('/(tabs)/contacts');
-    }
-  };
+  // ---------- 4. SIGNALING ----------
+  useEffect(() => {
+    const initiateCall = async () => {
+      try {
+        const token = await getToken();
+        const res = await axios.post(`${API_URL}/api/calls`, 
+          { callerId: user?.id, receiverId, callType: type },
+          { headers: { Authorization: `Bearer ${token}` } }
+        );
+        callIdRef.current = String(res.data._id);
+      } catch { safeClose(); }
+    };
+
+    initiateCall();
+
+    const onAccepted = (data: any) => {
+      if (isNavigating.current) return;
+      isNavigating.current = true;
+      InCallManager.stopRingback();
+
+      screenOpacity.value = withTiming(0, { duration: 200 }, () => {
+        setTimeout(() => {
+          handleFinalExit({
+            pathname: '/(tabs)/calls/Call',
+            params: {
+              callId: data._id || data.callId,
+              callerId: user?.id,
+              receiverId,
+              callerName: name,
+              type,
+              isCaller: 'true',
+              image,
+              origin
+            },
+          });
+        }, 50);
+      });
+    };
+
+    socket.on('call-ended', safeClose);
+    socket.on('call-accepted', onAccepted);
+    socket.on('call-declined', safeClose);
+
+    return () => {
+      socket.off('call-accepted');
+      socket.off('call-declined');
+      socket.off('call-ended');
+    };
+  }, [socket]);
 
   return (
-    <ImageBackground source={{ uri: image }} style={styles.background} blurRadius={20}>
-      <BlurView intensity={50} tint="dark" style={StyleSheet.absoluteFill}>
-        <View style={styles.container}>
-          <View style={styles.header}>
-            <Image source={{ uri: image }} style={styles.avatar} />
+    <Animated.View style={[{ flex: 1 }, screenAnimStyle]}>
+      <ImageBackground source={avatarSource} style={styles.background} blurRadius={80}>
+        <StatusBar barStyle="light-content" hidden />
+        <BlurView intensity={45} tint="dark" style={styles.container}>
+          <View />
+          <Animated.View entering={FadeIn.delay(200).duration(500)} style={styles.centerContent}>
+            <View style={styles.avatarWrapper}>
+              <Animated.View style={[styles.pulseRing, animatedRingStyle]} />
+              <Image source={avatarSource} style={styles.avatar} />
+            </View>
             <Text style={styles.name}>{name}</Text>
-            <Text style={styles.status}>
-                {type === 'video' ? 'Video calling...' : 'Voice calling...'}
-            </Text>
-          </View>
-
-          <View style={styles.buttonContainer}>
-            <TouchableOpacity onPress={onEndCall} style={[styles.button, { backgroundColor: '#FF3B30' }]}>
-              <Ionicons name="call" size={40} color="#fff" style={{ transform: [{ rotate: '135deg' }] }} />
-            </TouchableOpacity>
-            <Text style={styles.buttonLabel}>Cancel</Text>
-          </View>
-        </View>
-      </BlurView>
-    </ImageBackground>
+            <Text style={styles.status}>{type === 'video' ? 'VIDEO CALLING...' : 'AUDIO CALLING...'}</Text>
+          </Animated.View>
+          <TouchableOpacity activeOpacity={0.8} onPress={safeClose} style={styles.hangupBtn}>
+            <MaterialIcons name="call-end" size={34} color="#fff" />
+          </TouchableOpacity>
+        </BlurView>
+      </ImageBackground>
+    </Animated.View>
   );
 };
 
 const styles = StyleSheet.create({
-  background: { flex: 1 },
-  container: {
-    flex: 1,
-    padding: 20,
-    justifyContent: 'space-between',
-    alignItems: 'center',
-  },
-  header: {
-    alignItems: 'center',
-    paddingTop: 100,
-  },
-  avatar: {
-    width: 150,
-    height: 150,
-    borderRadius: 75,
-    marginBottom: 50,
-    borderWidth: 3,
-    borderColor: 'rgba(255, 255, 255, 0.7)',
-  },
-  name: {
-    fontSize: 36,
-    fontWeight: '700',
-    color: '#fff',
-    marginBottom: 10,
-  },
-  status: {
-    fontSize: 20,
-    color: 'rgba(255, 255, 255, 0.8)',
-  },
-  buttonContainer: {
-    alignItems: 'center',
-    width: '100%',
-    paddingBottom: 60,
-  },
-  button: {
-    width: 80,
-    height: 80,
-    borderRadius: 40,
-    justifyContent: 'center',
-    alignItems: 'center',
-    elevation: 8,
-  },
-  buttonLabel: {
-    color: '#fff',
-    marginTop: 15,
-    fontSize: 16,
-  },
+  background: { flex: 1, backgroundColor: '#000' },
+  container: { flex: 1, justifyContent: 'space-between', alignItems: 'center', paddingVertical: 100 },
+  centerContent: { alignItems: 'center' },
+  avatarWrapper: { justifyContent: 'center', alignItems: 'center' },
+  pulseRing: { position: 'absolute', width: 220, height: 220, borderRadius: 110, borderWidth: 1.5, borderColor: 'rgba(255,255,255,0.25)' },
+  avatar: { width: 120, height: 120, borderRadius: 60, borderWidth: 3, borderColor: '#fff' },
+  name: { color: '#fff', fontSize: 28, fontWeight: '700', marginTop: 30 },
+  status: { color: 'rgba(255,255,255,0.6)', fontSize: 15, marginTop: 8, textTransform: 'uppercase', letterSpacing: 2 },
+  hangupBtn: { width: 76, height: 76, borderRadius: 38, backgroundColor: '#FF3B30', justifyContent: 'center', alignItems: 'center', elevation: 8 }
 });
 
 export default NewCallScreen;

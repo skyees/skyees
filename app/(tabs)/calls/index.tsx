@@ -1,4 +1,3 @@
-
 import Colors from '@/constants/Colors';
 import { useUser, useAuth } from '@clerk/clerk-expo';
 import { Stack, useRouter } from 'expo-router';
@@ -12,7 +11,7 @@ import {
   TouchableOpacity,
   ActivityIndicator,
 } from 'react-native';
-import { useEffect, useState } from 'react';
+import { useEffect, useState, useMemo, useRef } from 'react';
 import { SegmentedControl } from '@/components/SegmentedControl';
 import { defaultStyles } from '@/constants/Styles';
 import { Ionicons } from '@expo/vector-icons';
@@ -28,7 +27,7 @@ import Animated, {
 } from 'react-native-reanimated';
 import SwipeableRow from '@/components/SwipeableRow';
 import * as Haptics from 'expo-haptics';
-import useSocket from '@/utils/socket'; // FIX: Re-added the missing import
+import useSocket from '@/utils/socket';
 
 const transition = CurvedTransition.delay(100);
 const AnimatedTouchableOpacity = Animated.createAnimatedComponent(TouchableOpacity);
@@ -39,23 +38,25 @@ const Page = () => {
   const editing = useSharedValue(-30);
   const API_URL = process.env.EXPO_PUBLIC_API_URL;
   const socket = useSocket();
-  const router = useRouter();
   const { user, isLoaded } = useUser();
   const { getToken } = useAuth();
+  const router = useRouter();
 
   const [allItems, setAllItems] = useState<any[]>([]);
-  const [items, setItems] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
-  const [calls, setCalls] = useState([]);
-  // ✅ 1. Stable Data Fetching
+  
+  // ✅ Prevent duplicate fetch triggers during re-renders
+  const hasFetched = useRef(false);
+
   useEffect(() => {
-    if (!isLoaded || !user?.id) {
-      if (isLoaded) setLoading(false); // Only stop loading if Clerk is done
+    if (!isLoaded || !user?.id || hasFetched.current) {
+      if (isLoaded && !user?.id) setLoading(false);
       return;
     }
-    setLoading(true);
 
     const fetchAndEnrichCalls = async () => {
+      hasFetched.current = true; 
+      setLoading(true);
       try {
         const token = await getToken();
         if (!token) return;
@@ -81,11 +82,10 @@ const Page = () => {
           })
         );
 
-      const sortedCalls = enrichedCalls.sort(
-              (a, b) => new Date(b.createdAt) - new Date(a.createdAt)
-            );
+        const sortedCalls = enrichedCalls.sort(
+          (a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime()
+        );
 
-        setCalls(sortedCalls.slice(0, 20));
         setAllItems(sortedCalls);
       } catch (error) {
         console.error('❌ Error fetching calls:', error);
@@ -97,22 +97,13 @@ const Page = () => {
     fetchAndEnrichCalls();
   }, [isLoaded, user?.id]);
 
-
-
-  // ✅ 2. Stable, SINGLE Socket Listener Hook
   useEffect(() => {
-    if (!socket || !isLoaded || !user?.id) {
-      return;
-    }
+    if (!socket || !user?.id) return;
 
     socket.emit('register', user.id);
-    console.log(`🟢 Socket registered for user: ${user.id}`);
-
-
 
     const onCallAdded = async (newCall: any) => {
-      console.log('➕ Call added received:', newCall);
-       try {
+      try {
         const token = await getToken();
         const otherUserId = newCall.callerId === user.id ? newCall.receiverId : newCall.callerId;
         const userResponse = await axios.get(`${API_URL}/api/users/${otherUserId}`, {
@@ -121,46 +112,30 @@ const Page = () => {
         const enrichedCall = { ...newCall, name: userResponse.data.username, img: userResponse.data.profilePic };
         setAllItems((prev) => [enrichedCall, ...prev]);
       } catch (error) {
-        const enrichedCall = { ...newCall, name: 'Unknown', img: null };
-        setAllItems((prev) => [enrichedCall, ...prev]);
+        setAllItems((prev) => [{ ...newCall, name: 'Unknown' }, ...prev]);
       }
     };
 
     const onCallEnded = (endedCall: any) => {
-      console.log('🔚 Call ended received:', endedCall);
       setAllItems((prevItems) =>
         prevItems.map((item) => (item._id === endedCall._id ? { ...item, ...endedCall } : item))
       );
     };
 
-
     socket.on('call-added', onCallAdded);
     socket.on('call-ended', onCallEnded);
 
     return () => {
-
       socket.off('call-added', onCallAdded);
       socket.off('call-ended', onCallEnded);
     };
-  }, [socket, isLoaded, user?.id]);
+  }, [socket, user?.id]);
 
-  // ✅ 3. Filtering Logic
-  useEffect(() => {
-    if (selectedOption === 'All') {
-      setItems(allItems);
-    } else {
-      setItems(allItems.filter((call) => call.missed && call.callerId !== user?.id));
-    }
+  // ✅ Memoized filtering prevents unnecessary re-renders of the list
+  const items = useMemo(() => {
+    if (selectedOption === 'All') return allItems;
+    return allItems.filter((call) => call.missed && call.callerId !== user?.id);
   }, [allItems, selectedOption, user?.id]);
-
-  const onSegmentChange = (option: string) => {
-    setSelectedOption(option);
-  };
-
-  const removeCall = (toDelete: any) => {
-    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
-    setAllItems((prev) => prev.filter((item) => item._id !== toDelete._id));
-  };
 
   const onEdit = () => {
     const editingNew = !isEditing;
@@ -172,7 +147,20 @@ const Page = () => {
     transform: [{ translateX: withTiming(editing.value) }],
   }));
 
-  if (loading && !items.length) {
+  // ✅ Defensive Date Formatting to prevent "Invalid Time Value" crash
+  const getFormattedDate = (dateString: any) => {
+    if (!dateString) return 'Just now';
+    const date = new Date(dateString);
+    if (isNaN(date.getTime())) return 'Recently'; 
+    return format(date, 'MM.dd.yy');
+  };
+
+  const removeCall = (id: string) => {
+    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+    setAllItems(prev => prev.filter(i => i._id !== id));
+  };
+
+  if (loading && allItems.length === 0) {
     return (
       <View style={{ flex: 1, justifyContent: 'center', alignItems: 'center', backgroundColor: Colors.background }}>
         <ActivityIndicator size="large" color={Colors.primary} />
@@ -185,11 +173,15 @@ const Page = () => {
       <Stack.Screen
         options={{
           headerTitle: () => (
-            <SegmentedControl options={['All', 'Missed']} selectedOption={selectedOption} onOptionPress={onSegmentChange} />
+            <SegmentedControl 
+                options={['All', 'Missed']} 
+                selectedOption={selectedOption} 
+                onOptionPress={(opt) => setSelectedOption(opt)} 
+            />
           ),
           headerLeft: () => (
-            <TouchableOpacity onPress={onEdit} disabled={!isLoaded}>
-              <Text style={{ color: Colors.primary, fontSize: 18, opacity: !isLoaded ? 0.5 : 1 }}>
+            <TouchableOpacity onPress={onEdit}>
+              <Text style={{ color: Colors.primary, fontSize: 18 }}>
                 {isEditing ? 'Done' : 'Edit'}
               </Text>
             </TouchableOpacity>
@@ -198,19 +190,25 @@ const Page = () => {
       />
       <ScrollView contentInsetAdjustmentBehavior="automatic">
         <Animated.View style={defaultStyles.block} layout={transition}>
-          <Animated.FlatList
-            skipEnteringExitingAnimations
+          <FlatList
             data={items}
             scrollEnabled={false}
-            itemLayoutAnimation={transition}
-            keyExtractor={(item) => item._id.toString()}
+            keyExtractor={(item) => item._id?.toString() || Math.random().toString()}
             ItemSeparatorComponent={() => <View style={defaultStyles.separator} />}
             renderItem={({ item, index }) => (
-              <SwipeableRow onDelete={() => removeCall(item)}>
-                <Animated.View entering={FadeInUp.delay(index * 20)} exiting={FadeOutUp} style={{ flexDirection: 'row', alignItems: 'center' }}>
-                  <AnimatedTouchableOpacity style={[animatedRowStyles, { paddingLeft: 8 }]} onPress={() => removeCall(item)}>
+              <SwipeableRow onDelete={() => removeCall(item._id)}>
+                <Animated.View 
+                    entering={FadeInUp.delay(index * 10)} 
+                    exiting={FadeOutUp} 
+                    style={{ flexDirection: 'row', alignItems: 'center' }}
+                >
+                  <AnimatedTouchableOpacity 
+                    style={[animatedRowStyles, { paddingLeft: 8 }]} 
+                    onPress={() => removeCall(item._id)}
+                  >
                     <Ionicons name="remove-circle" size={24} color={Colors.red} />
                   </AnimatedTouchableOpacity>
+                  
                   <Animated.View style={[defaultStyles.item, { paddingLeft: 20 }, animatedRowStyles]}>
                     {item.img ? (
                       <Image source={{ uri: item.img }} style={styles.avatar} />
@@ -221,17 +219,21 @@ const Page = () => {
                         </Text>
                       </View>
                     )}
+
                     <View style={{ flex: 1, gap: 2 }}>
                       <Text style={{ fontSize: 18, color: item.missed && item.callerId !== user?.id ? Colors.red : '#000' }}>
                         {item.name}
                       </Text>
                       <View style={{ flexDirection: 'row', gap: 4 }}>
-                        <Ionicons name={item.video ? 'videocam' : 'call'} size={16} color={Colors.gray} />
+                        <Ionicons name={item.callType === 'video' ? 'videocam' : 'call'} size={16} color={Colors.gray} />
                         <Text style={{ color: Colors.gray, flex: 1 }}>{item.callerId === user?.id ? 'Outgoing' : 'Incoming'}</Text>
                       </View>
                     </View>
+
                     <View style={{ flexDirection: 'row', gap: 6, alignItems: 'center' }}>
-                      <Text style={{ color: Colors.gray }}>{format(new Date(item.startedAt), 'MM.dd.yy')}</Text>
+                      <Text style={{ color: Colors.gray }}>
+                        {getFormattedDate(item.createdAt)}
+                      </Text>
                       <Ionicons name="information-circle-outline" size={24} color={Colors.primary} />
                     </View>
                   </Animated.View>

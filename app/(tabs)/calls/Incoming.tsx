@@ -1,188 +1,246 @@
-import { View, Text, StyleSheet, Image, TouchableOpacity } from 'react-native';
-import React, { useEffect, useState } from 'react';
-import { useLocalSearchParams, useRouter } from 'expo-router';
-import { Feather } from '@expo/vector-icons';
-import Animated, { FadeInDown, FadeOut } from 'react-native-reanimated';
-import useSocket from '@/utils/socket';
-import { useAuth, useUser } from '@clerk/clerk-expo';
+import React, { useEffect, useRef } from 'react';
+import {
+  View, Text, Image, TouchableOpacity,
+  ImageBackground, StatusBar, Animated, Easing, StyleSheet
+} from 'react-native';
+import { useLocalSearchParams, useRouter, useNavigation } from 'expo-router';
+import { MaterialIcons, Ionicons } from '@expo/vector-icons';
+import { BlurView } from 'expo-blur';
 import axios from 'axios';
-
-// Reanimated components for smooth animations
-const AnimatedTouchableOpacity = Animated.createAnimatedComponent(TouchableOpacity);
-const AnimatedView = Animated.createAnimatedComponent(View);
+import { useAuth } from '@clerk/clerk-expo';
+import useSocket from '@/utils/socket';
+import InCallManager from 'react-native-incall-manager';
 
 const Incoming = () => {
-    const router = useRouter();
-    const socket = useSocket();
-    const { getToken } = useAuth();
-    const { user } = useUser();
+  const router = useRouter();
+  const navigation = useNavigation();
+  const socket = useSocket();
+  const { getToken } = useAuth();
 
-    // Get call data passed from the previous screen
-    const { callerName, callerId, receiverId, callType, _id: callId, callerImg } = useLocalSearchParams<{
-        callerName: string;
-        callerId: string;
-        receiverId: string;
-        callType: 'video' | 'audio';
-        _id: string;
-        callerImg: string;
-    }>();
+  const { callerName, callerId, receiverId, callType, _id: callId, callerImg } =
+    useLocalSearchParams();
 
-    const API_URL = process.env.EXPO_PUBLIC_API_URL;
+  const API_URL = process.env.EXPO_PUBLIC_API_URL;
+  const isNavigating = useRef(false);
 
-    // This effect listens for when the caller hangs up before you answer
-    useEffect(() => {
-        if (!socket) return;
+  // Use standard Animated values
+  const screenOpacity = useRef(new Animated.Value(0)).current;
+  const screenScale = useRef(new Animated.Value(0.94)).current;
 
-        const onCallCancelled = ({ callId: cancelledCallId }: { callId: string }) => {
-            if (cancelledCallId === callId) {
-                // If the incoming call is the one that was cancelled, close the modal
-                if (router.canGoBack()) {
-                    router.back();
-                }
-            }
-        };
+  // --- ENTRY ---
+  useEffect(() => {
+    navigation.setOptions({ headerShown: false });
+    const parent = navigation.getParent();
+    parent?.setOptions({ tabBarStyle: { display: "none" } });
 
-        socket.on('call-cancelled', onCallCancelled);
+    // Start Ringtone
+    InCallManager.startRingtone('_BUNDLE_');
 
-        return () => {
-            socket.off('call-cancelled', onCallCancelled);
-        };
-    }, [socket, callId, router]);
+    Animated.parallel([
+      Animated.timing(screenOpacity, {
+        toValue: 1,
+        duration: 260,
+        easing: Easing.out(Easing.cubic),
+        useNativeDriver: true
+      }),
+      Animated.spring(screenScale, {
+        toValue: 1,
+        friction: 10,
+        tension: 70,
+        useNativeDriver: true
+      })
+    ]).start();
 
-    // Function to handle declining the call
-    const onDecline = async () => {
-        try {
-            const token = await getToken();
-            // Tell the backend that the call was missed/declined
-            await axios.put(
-                `${API_URL}/api/calls/end`,
-                { callId, status: 'missed' },
-                { headers: { Authorization: `Bearer ${token}` } }
-            );
-        } catch (error) {
-            console.error("Error declining call:", error);
-        } finally {
-            // Close the incoming call modal. [1]
-            if (router.canGoBack()) {
-                router.back();
-            }
-        }
+    return () => {
+      InCallManager.stopRingtone();
+      // Restore Tabs on cleanup
+      parent?.setOptions({ tabBarStyle: { display: "flex" } });
     };
-const [isAccepting, setIsAccepting] = useState(false);
-    // Function to handle accepting the call
-    const onAccept = async () => {
-        try {
-            const token = await getToken();
-    if (isAccepting) return; // prevent duplicate call
-            // 1. Tell the backend that the call has been accepted
-            await axios.put(
-                `${API_URL}/api/calls/accept`,
-                { callId },
-                { headers: { Authorization: `Bearer ${token}` } }
-            );
+  }, []);
 
-            // 2. Navigate to the main call screen, passing all necessary data
-            // We use `replace` to prevent the user from going back to the incoming call screen.
-            router.replace({
-                pathname: '(tabs)/calls/Call',
-                params: {
-                  callerName,
-                  callerId,
-                  receiverId,
-                  type: callType, // ✅ FIXED
-                  callId,
-                  isCaller: 'false'
-                },
-                          });
-        } catch (error) {
-            console.error("Error accepting call:", error);
-            // If accepting fails, just close the modal. [1]
-            if (router.canGoBack()) {
-                setIsAccepting(false);
-                router.back();
-            }
-        }
+  // --- EXIT LOGIC ---
+  const runExitThen = (next: () => void) => {
+    Animated.parallel([
+      Animated.timing(screenOpacity, {
+        toValue: 0,
+        duration: 200,
+        easing: Easing.in(Easing.cubic),
+        useNativeDriver: true
+      }),
+      Animated.timing(screenScale, {
+        toValue: 0.92,
+        duration: 200,
+        useNativeDriver: true
+      })
+    ]).start(() => {
+        // Ensure the callback is fired outside the animation frame
+        setTimeout(next, 0);
+    });
+  };
+
+  const safeClose = () => {
+    if (isNavigating.current) return;
+    isNavigating.current = true;
+
+    InCallManager.stopRingtone();
+    InCallManager.stop();
+
+    const parent = navigation.getParent();
+
+    runExitThen(() => {
+      parent?.setOptions({ tabBarStyle: { display: "flex" } });
+      // Kill current screen and reset to calls tab
+      router.replace('/(tabs)/calls');
+    });
+  };
+
+  useEffect(() => {
+    socket?.on('call-ended', safeClose);
+    socket?.on('call-cancelled', safeClose);
+    return () => {
+      socket?.off('call-ended');
+      socket?.off('call-cancelled');
     };
+  }, [socket]); // Added socket dependency
 
-    return (
-        <AnimatedView style={styles.container} entering={FadeInDown} exiting={FadeOut}>
-            <Image source={{ uri: callerImg }} style={styles.callerImage} />
-            <Text style={styles.callerName}>{callerName}</Text>
-            <Text style={styles.callType}>{callType === 'video' ? 'Video Call' : 'Audio Call'}</Text>
+  const onAccept = async () => {
+    if (isNavigating.current) return;
+    isNavigating.current = true;
 
-            <View style={styles.buttonContainer}>
-                {/* Decline Button */}
-                <AnimatedTouchableOpacity
-                    onPress={onDecline}
-                    style={[styles.button, styles.declineButton]}
-                    entering={FadeInDown.delay(200)}
-                >
-                    <Feather name="x" size={40} color="white" />
-                    <Text style={styles.buttonText}>Decline</Text>
-                </AnimatedTouchableOpacity>
-                {/* Accept Button */}
-                <AnimatedTouchableOpacity
-                    onPress={onAccept}
-                    style={[styles.button, styles.acceptButton]}
-                    entering={FadeInDown.delay(400)}
-                >
-                    <Feather name={callType === 'video' ? 'video' : 'phone'} size={40} color="white" />
-                    <Text style={styles.buttonText}>Accept</Text>
-                </AnimatedTouchableOpacity>
+    InCallManager.stopRingtone();
+
+    try {
+      const token = await getToken();
+      await axios.put(
+        `${API_URL}/api/calls/accept`,
+        { callId },
+        { headers: { Authorization: `Bearer ${token}` } }
+      );
+
+      runExitThen(() => {
+        router.replace({
+          pathname: '/(tabs)/calls/Call',
+          params: {
+            callerName,
+            callerId,
+            receiverId,
+            type: callType,
+            callId,
+            isCaller: 'false',
+            image: callerImg,
+            origin: 'calls'
+          },
+        });
+      });
+
+    } catch {
+      safeClose();
+    }
+  };
+
+  const onDecline = async () => {
+    try {
+      const token = await getToken();
+      await axios.put(
+        `${API_URL}/api/calls/end`,
+        { callId, status: 'missed' },
+        { headers: { Authorization: `Bearer ${token}` } }
+      );
+    } catch {}
+
+    safeClose();
+  };
+
+  const avatarUri =
+    callerImg && typeof callerImg === "string" && callerImg.trim() !== ""
+      ? { uri: callerImg }
+      : require("@/assets/images/user-default.jpg");
+
+  return (
+    <Animated.View style={[styles.root, { opacity: screenOpacity, transform: [{ scale: screenScale }] }]}>
+      <ImageBackground source={avatarUri} style={styles.bg} blurRadius={60}>
+        <StatusBar hidden />
+
+        <BlurView intensity={30} tint="dark" style={styles.blur}>
+          <View />
+
+          <View style={styles.center}>
+            <Image source={avatarUri} style={styles.avatar} />
+            <Text style={styles.name}>{callerName}</Text>
+
+            <View style={styles.typeBadge}>
+              <Ionicons
+                name={callType === 'video' ? 'videocam' : 'call'}
+                size={16}
+                color="#fff"
+                style={styles.typeIcon}
+              />
+              <Text style={styles.typeText}>
+                INCOMING {callType === 'video' ? 'VIDEO' : 'AUDIO'}
+              </Text>
             </View>
-        </AnimatedView>
-    );
+          </View>
+
+          <View style={styles.actionsRow}>
+            <TouchableOpacity onPress={onDecline} style={[styles.actionBtn, styles.declineBtn]}>
+              <MaterialIcons name="call-end" size={32} color="#fff" />
+            </TouchableOpacity>
+
+            <TouchableOpacity onPress={onAccept} style={[styles.actionBtn, styles.acceptBtn]}>
+              <MaterialIcons
+                name={callType === 'video' ? 'videocam' : 'call'}
+                size={32}
+                color="#fff"
+              />
+            </TouchableOpacity>
+          </View>
+
+        </BlurView>
+      </ImageBackground>
+    </Animated.View>
+  );
 };
 
+export default Incoming;
 
 const styles = StyleSheet.create({
-    container: {
-        flex: 1,
-        justifyContent: 'center',
-        alignItems: 'center',
-        backgroundColor: 'rgba(0,0,0,0.8)', // Semi-transparent background
-    },
-    callerImage: {
-        width: 120,
-        height: 120,
-        borderRadius: 60,
-        marginBottom: 20,
-    },
-    callerName: {
-        fontSize: 32,
-        fontWeight: 'bold',
-        color: 'white',
-    },
-    callType: {
-        fontSize: 20,
-        color: 'rgba(255, 255, 255, 0.7)',
-        marginTop: 8,
-    },
-    buttonContainer: {
-        flexDirection: 'row',
-        justifyContent: 'space-around',
-        width: '80%',
-        position: 'absolute',
-        bottom: 80,
-    },
-    button: {
-        width: 80,
-        height: 80,
-        borderRadius: 40,
-        justifyContent: 'center',
-        alignItems: 'center',
-    },
-    declineButton: {
-        backgroundColor: '#FF3B30', // iOS red
-    },
-    acceptButton: {
-        backgroundColor: '#34C759', // iOS green
-    },
-    buttonText: {
-        color: 'white',
-        marginTop: 8,
-        fontSize: 14,
-    },
+  root: { flex: 1, backgroundColor: '#000' },
+  bg: { flex: 1 },
+  blur: {
+    flex: 1,
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    paddingVertical: 90
+  },
+  center: { alignItems: 'center' },
+  avatar: {
+    width: 120,
+    height: 120,
+    borderRadius: 60,
+    borderWidth: 3,
+    borderColor: 'rgba(255,255,255,0.8)',
+    marginBottom: 20
+  },
+  name: { color: '#fff', fontSize: 32, fontWeight: '700' },
+  typeBadge: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: 'rgba(255,255,255,0.1)',
+    paddingHorizontal: 14,
+    paddingVertical: 8,
+    borderRadius: 20,
+    marginTop: 10
+  },
+  typeIcon: { marginRight: 6 },
+  typeText: { color: '#fff', fontSize: 14, fontWeight: '500' },
+  actionsRow: { flexDirection: 'row', gap: 40 },
+  actionBtn: {
+    width: 75,
+    height: 75,
+    borderRadius: 38,
+    justifyContent: 'center',
+    alignItems: 'center'
+  },
+  declineBtn: { backgroundColor: '#FF3B30' },
+  acceptBtn: { backgroundColor: '#34C759' }
 });
-
-export default Incoming;

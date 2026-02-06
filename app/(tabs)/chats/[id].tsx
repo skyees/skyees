@@ -2,7 +2,7 @@ import ChatMessageBox from '@/components/ChatMessageBox';
 import ReplyMessageBar from '@/components/ReplyMessageBar';
 import Colors from '@/constants/Colors';
 import { Ionicons } from '@expo/vector-icons';
-import React, { useState, useCallback, useEffect, useRef, useMemo } from 'react';
+import React, { useState, useCallback, useEffect, useRef } from 'react';
 import { Stack, useLocalSearchParams } from 'expo-router';
 import {
   ImageBackground,
@@ -35,8 +35,6 @@ import { Swipeable, TextInput } from 'react-native-gesture-handler';
 import 'react-native-get-random-values';
 import EmojiSelector from "react-native-emoji-selector";
 import ionicons  from "@expo/vector-icons";
-import { resolveDisplayName } from "@/utils/displayName";
-import { loadContacts, buildContactMap } from "@/utils/contacts";
 
 
 import { v4 as uuidv4 } from 'uuid';
@@ -63,8 +61,7 @@ const ChatPage = () => {
   const [isTyping, setIsTyping] = useState(false);
   const [typingUserName, setTypingUserName] = useState("");
  const [showEmojiPicker, setShowEmojiPicker] = useState(false);
- const [showEmojiModal, setShowEmojiModal] = useState(false);
- const [contactMap, setContactMap] = useState<Record<string, string>>({});
+const [showEmojiModal, setShowEmojiModal] = useState(false);
 
   useEffect(() => {
     if (!socket || !user) return;
@@ -91,16 +88,6 @@ const ChatPage = () => {
       socket.off("stop-typing", stopTypingHandler);
     };
   }, [socket, user?.id]);
-
-    useEffect(() => {
-        const initContacts = async () => {
-          const contacts = await loadContacts();
-          const map = buildContactMap(contacts);
-          setContactMap(map);
-        };
-        initContacts();
-      }, []);
-
 
   useEffect(() => {
     const fetchTitle = async () => {
@@ -209,52 +196,21 @@ const ChatPage = () => {
     }, 1200);
   };
 
-const onSend = useCallback(
-  (messages: IMessage[] = []) => {
+  const onSend = useCallback((messages: IMessage[] = []) => {
     if (!user) return;
     const msg = messages[0];
     const clientId = msg._id || uuidv4();
 
-    // ✅ If editing, update instead of appending
-    if (editingMessage) {
-      // Update locally
-      setImessages((prev) =>
-        prev.map((m) =>
-          m._id === editingMessage._id
-            ? { ...m, text: msg.text, __optimistic: true }
-            : m
-        )
-      );
-
-      // Emit edit event to server
-      socket.emit("edit-message", {
-        id: editingMessage._id,
-        text: msg.text || "",
-        senderId: user.id,
-        updatedAt: new Date(),
-        ...(isGroup ? { roomId: id } : { receiverId }),
-      });
-
-      setEditingMessage(null); // ✅ clear edit mode
-      return;
-    }
-
-    // ✅ Otherwise, normal send (with reply support)
     const optimisticMessage = {
       ...msg,
       _id: clientId,
       user: { _id: user.id },
       createdAt: new Date(),
       __optimistic: true,
-      replyTo: replyMessage
-        ? {
-            _id: replyMessage._id,
-            text: replyMessage.text,
-            senderId: replyMessage.user._id,
-          }
-        : null,
+      replyTo: replyMessage ? { _id: replyMessage._id, text: replyMessage.text, senderId: replyMessage.user._id } : null,
     };
 
+    
     setImessages((prev) => GiftedChat.append(prev, [optimisticMessage]));
 
     socket.emit("new-message", {
@@ -270,9 +226,7 @@ const onSend = useCallback(
     });
 
     setReplyMessage(null);
-  },
-  [user, replyMessage, editingMessage, socket, isGroup, id, receiverId]
-);
+  }, [user, replyMessage, socket, isGroup, id, receiverId]);
 
  // Builds and sends the message
 const handleImagePicked = (uriOrUrl: string) => {
@@ -328,82 +282,33 @@ const renderInputToolbar = (props: any) => (
 );
 
 
-const getDisplayName = (msgUser, currentUserId) => {
-  if (!msgUser) return "Contact";
-
-  // If it's the current user
-  if (msgUser._id === currentUserId || msgUser.senderId === currentUserId) {
-    return "You";
-  }
-
-  // If senderName exists and is not just the ID string
-  if (msgUser.name && !msgUser.name.startsWith("user_")) {
-    return msgUser.name;
-  }
-  if (msgUser.senderName && !msgUser.senderName.startsWith("user_")) {
-    return msgUser.senderName;
-  }
-
-  // Fallback
-  return "Contact";
-};
 
 
-
-const renderChatFooter = () => {
-
-  if (editingMessage) {
-    return (
-      <View style={styles.editingBar}>
-        <Text style={styles.editingTitle}>Editing Message</Text>
-        <Text numberOfLines={4} style={styles.editingText}>
-          {editingMessage.text}
-        </Text>
-        <TouchableOpacity
-          onPress={() => {
-            setEditingMessage(null);
-            setText("");
-          }}
-          style={styles.cancelButton}
-        >
-          <Ionicons name="close" size={22} color="gray" />
-        </TouchableOpacity>
-      </View>
-    );
-  }
-
-  if (replyMessage) {
-    return (
-      <View style={styles.replyBar}>
-        <View style={{ flex: 1 }}>
-          <Text style={styles.replyTitle}>
-            Replying to{" "}
-            <Text style={styles.replyUser}>
-               {resolveDisplayName(replyMessage.user,  user?.id, contactMap)}
-            </Text>
-          </Text>
-          <Text numberOfLines={4} style={styles.replyPreview}>
-            {replyMessage.text || "Media"}
-          </Text>
+  const renderChatFooter = () => {
+    if (editingMessage) {
+      return (
+        <View style={styles.editingBar}>
+          <Text style={styles.editingTitle}>Editing Message</Text>
+          <Text numberOfLines={1} style={styles.editingText}>{editingMessage.text}</Text>
+          <TouchableOpacity onPress={() => { setEditingMessage(null); setText(''); }}>
+            <Ionicons name="close" size={22} color="gray" />
+          </TouchableOpacity>
         </View>
-        <TouchableOpacity onPress={() => setReplyMessage(null)} style={styles.cancelButton}>
-          <Ionicons name="close" size={22} color="gray" />
-        </TouchableOpacity>
-      </View>
-    );
-  }
-  return null;
-
-
-};
-
-    const messageMap = useMemo(() => {
-      const map: Record<string, IMessage> = {};
-      messages.forEach((m) => { map[m._id] = m; });
-      return map;
-    }, [messages]);
-
-
+      );
+    }
+    if (replyMessage) {
+      return (
+        <View style={styles.replyBar}>
+          <Text style={styles.replyTitle}>Replying to {replyMessage.user._id === user?.id ? 'You' : (replyMessage.user.name || 'Contact')}</Text>
+          <Text numberOfLines={1} style={styles.replyPreview}>{replyMessage.text || 'Media'}</Text>
+          <TouchableOpacity onPress={() => setReplyMessage(null)}>
+            <Ionicons name="close" size={22} color="gray" />
+          </TouchableOpacity>
+        </View>
+      );
+    }
+    return null;
+  };
 
   const updateRowRef = useCallback((ref: Swipeable | null) => {
     if (ref && replyMessage && (ref as any)?.props?.children?.props?.currentMessage?._id === replyMessage._id) {
@@ -452,27 +357,6 @@ const renderChatFooter = () => {
       <VideoRecorder visible={showVideoModal} onClose={() => setShowVideoModal(false)} onSend={onSend} userId={user?.id} />
 
       <Stack.Screen options={{ headerTitle: isTyping ? typingUserName : title }} />
-      
-            {editingMessage ? (
-        <ReplyMessageBar
-          clearReply={() => setEditingMessage(null)}
-          message={editingMessage}
-          currentUserId={user?.id}
-          contactMap={contactMap}
-          isEditing={true}
-        />
-      ) : replyMessage ? (
-        <ReplyMessageBar
-          clearReply={() => setReplyMessage(null)}
-          message={replyMessage}
-          currentUserId={user?.id}
-          contactMap={contactMap}
-          isEditing={false}
-        />
-      ) : null}
-
-
-
 
       <ImageBackground source={require('@/assets/images/pattern.png')} style={{ flex: 1, backgroundColor: Colors.background }}>
         <KeyboardAvoidingView style={{ flex: 1 }} behavior={Platform.OS === 'ios' ? 'padding' : undefined} keyboardVerticalOffset={66}>
@@ -515,7 +399,6 @@ const renderChatFooter = () => {
                 setEditedText={setText}
                 setReplyOnSwipeOpen={setReplyMessage}
                 updateRowRef={updateRowRef}
-                messageMap={messageMap} 
               />
             )}
            isTyping={isTyping} 
@@ -543,17 +426,7 @@ const styles = StyleSheet.create({
     borderLeftColor: "#25D366",
     padding: 8,
   },
-
-    replyUser: {
-    fontWeight: "600",
-    marginLeft: 4,   // ✅ space between "Replying to" and name
-    color: "#333",
-  },
-  cancelButton: {
-    padding: 6,
-    marginLeft: 8,
-  },
-
+  
   replyTitle: { fontWeight: "700", color: "#25D366" },
   replyPreview: { color: "#333", width: "80%" },
   editingBar: {
