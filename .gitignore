@@ -36,3 +36,6 @@ api/android/
 
 expo-env.d.ts
 # @end expo-cli
+
+*.json
+firebase-adminsdk-*.json
