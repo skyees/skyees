@@ -1,5 +1,5 @@
-import React, { useState, useEffect } from 'react';
-import { View, StyleSheet, TouchableOpacity, Text, Image, Alert } from 'react-native';
+import React, { useState, useEffect, useRef } from 'react';
+import { View, StyleSheet, TouchableOpacity, Text, Image, Alert, Animated } from 'react-native';
 import { GestureHandlerRootView, Swipeable } from 'react-native-gesture-handler';
 import { Audio, Video } from 'expo-av';
 import { Ionicons } from '@expo/vector-icons';
@@ -9,6 +9,9 @@ type ChatMessageBoxProps = {
   setReplyOnSwipeOpen: (message: IMessage) => void;
   updateRowRef: (ref: any) => void;
   socket: any;
+  onMeasure?: (id: string, y: number) => void;
+  onReplyPress?: (id: string) => void;
+  highlightId?: string | null;
   setEditingMessage: (message: IMessage | null) => void;
   editingMessage: IMessage | null;
   editedText: string;
@@ -18,6 +21,9 @@ type ChatMessageBoxProps = {
 const ChatMessageBox = ({
   setReplyOnSwipeOpen,
   updateRowRef,
+  highlightId,
+  editingMessage,
+  onReplyPress,
   socket,
   setEditingMessage,
   editedText,
@@ -27,6 +33,7 @@ const ChatMessageBox = ({
   const msg = props.currentMessage;
   const [sound, setSound] = useState<Audio.Sound | null>(null);
   const isMine = props.position === 'right';
+  const isHighlighted = props.highlightId === msg?._id;
 
   useEffect(() => {
     return () => {
@@ -34,7 +41,17 @@ const ChatMessageBox = ({
     };
   }, [sound]);
 
-  // ✅ Swipe reply action
+  const fadeAnim = useRef(new Animated.Value(0)).current;
+
+  useEffect(() => {
+    if (isHighlighted) {
+      Animated.sequence([
+        Animated.timing(fadeAnim, { toValue: 1, duration: 180, useNativeDriver: false }),
+        Animated.timing(fadeAnim, { toValue: 0, duration: 800, useNativeDriver: false }),
+      ]).start();
+    }
+  }, [isHighlighted]);
+
   const renderLeftActions = () => (
     <View style={styles.replySwipe}>
       <Ionicons name="arrow-undo" size={22} color="white" />
@@ -45,7 +62,6 @@ const ChatMessageBox = ({
     if (msg) setReplyOnSwipeOpen(msg);
   };
 
-  // ✅ Long press options
   const onLongPress = () => {
     if (!msg) return;
 
@@ -75,43 +91,62 @@ const ChatMessageBox = ({
     );
   };
 
-  // ✅ WhatsApp-style reply preview
   const renderReplyPreview = () => {
     if (!msg?.replyTo) return null;
+
     const reply = msg.replyTo;
 
     let preview =
       reply.text ||
-      (reply.image
-        ? '📷 Photo'
-        : reply.video
-        ? '📹 Video'
-        : reply.audio
-        ? '🎤 Voice'
-        : 'Message');
+      (reply.image ? "📷 Photo" :
+       reply.video ? "📹 Video" :
+       reply.audio ? "🎤 Voice" : null);
+
+    if (!preview) return null;
 
     return (
-      <View style={styles.replyBubble}>
-        <Text style={styles.replySender}>
-          {reply.senderId === props.user?._id
-          ? 'You'
-          : reply.senderName
-          ? reply.senderName  
-          : 'Unknown'}         
-        </Text>
-        <Text numberOfLines={6} style={styles.replyPreviewText}>
+      <TouchableOpacity
+        onPress={() => props.onReplyPress?.(reply._id)}
+        activeOpacity={0.7}
+        style={styles.replyBubble}
+      >
+        <Text numberOfLines={2} style={styles.replyPreviewText}>
           {preview}
         </Text>
-      </View>
+      </TouchableOpacity>
     );
   };
 
-  // ✅ Main message body
+  // ✅ UPDATED: Exact WhatsApp Style Ticks (Blue for Seen)
+  const renderTicks = () => {
+    if (!isMine || !msg?.status) return null;
+
+    // 1. Sending -> Clock Icon
+    if (msg.status === "sending") 
+      return <Ionicons name="time-outline" size={12} color="#777" style={{ marginLeft: 2 }} />;
+
+    // 2. Sent -> Single Tick (Gray)
+    if (msg.status === "sent") 
+      return <Ionicons name="checkmark" size={16} color="#777" style={{ marginLeft: 2 }} />;
+
+    // 3. Delivered -> Double Tick (Gray)
+    if (msg.status === "delivered") 
+      return <Ionicons name="checkmark-done" size={16} color="#777" style={{ marginLeft: 2 }} />;
+
+    // 4. Seen -> Double Tick (Blue)
+    if (msg.status === "seen")
+      return <Ionicons name="checkmark-done" size={16} color="#34B7F1" style={{ marginLeft: 2 }} />;
+      
+    return null;
+  };
+
   const renderMessageBody = () => {
     const bubbleStyle = [
       styles.bubble,
       {
-        backgroundColor: isMine ? '#dcf8c6' : '#ffffff',
+        backgroundColor: isHighlighted
+          ? "#fff3cd"        // highlight flash
+          : isMine ? '#dcf8c6' : '#ffffff',
         alignSelf: isMine ? 'flex-end' : 'flex-start',
       },
     ];
@@ -121,8 +156,11 @@ const ChatMessageBox = ({
       return (
         <View style={bubbleStyle}>
           {renderReplyPreview()}
-          <Text style={styles.text}>{msg.text}</Text>
-          {msg.edited && <Text style={styles.editedFlag}>(edited)</Text>}
+          <View style={{ flexDirection: 'row', alignItems: 'flex-end', flexWrap: 'wrap' }}>
+            <Text style={styles.text}>{msg.text}</Text>
+            {msg.edited && <Text style={styles.editedFlag}>(edited)</Text>}
+            <View style={styles.tickRow}>{renderTicks()}</View>
+          </View>
         </View>
       );
     }
@@ -132,8 +170,15 @@ const ChatMessageBox = ({
       return (
         <View style={bubbleStyle}>
           {renderReplyPreview()}
-          <Image source={{ uri: msg.image }} style={styles.mediaImage} />
-          {msg.edited && <Text style={styles.editedFlag}>(edited)</Text>}
+          <Image
+            source={{ uri: msg.image }}
+            style={styles.mediaImage}
+            resizeMode="cover"
+          />
+          <View style={{ flexDirection: 'row', justifyContent: 'flex-end', alignItems: 'center', marginTop: 2 }}>
+            {msg.edited && <Text style={styles.editedFlag}>(edited)</Text>}
+            <View style={styles.tickRow}>{renderTicks()}</View>
+          </View>
         </View>
       );
     }
@@ -149,7 +194,10 @@ const ChatMessageBox = ({
             useNativeControls
             resizeMode="contain"
           />
-          {msg.edited && <Text style={styles.editedFlag}>(edited)</Text>}
+          <View style={{ flexDirection: 'row', justifyContent: 'flex-end', alignItems: 'center', marginTop: 2 }}>
+            {msg.edited && <Text style={styles.editedFlag}>(edited)</Text>}
+            <View style={styles.tickRow}>{renderTicks()}</View>
+          </View>
         </View>
       );
     }
@@ -163,44 +211,28 @@ const ChatMessageBox = ({
         );
         setSound(s);
       };
-
       return (
         <TouchableOpacity style={bubbleStyle} onPress={play}>
           {renderReplyPreview()}
-          <Text>▶️ Play Voice Message</Text>
-          {msg.edited && <Text style={styles.editedFlag}>(edited)</Text>}
-        </TouchableOpacity>
-      );
-    }
-
-    // ---- Contact ----
-    if (msg?.contact) {
-      return (
-        <View style={bubbleStyle}>
-          {renderReplyPreview()}
-          <View style={styles.contactCard}>
-            <Ionicons name="person-circle-outline" size={32} color="#128C7E" />
-            <View style={{ marginLeft: 8 }}>
-              <Text style={styles.contactName}>
-                {msg.contact?.name || 'Contact'}
-              </Text>
-              <Text style={styles.contactLabel}>Contact Message</Text>
-            </View>
+          <View style={{ flexDirection: 'row', alignItems: 'center', gap: 5 }}>
+             <Text style={{color: '#333'}}>▶️ Play Voice Message</Text>
           </View>
-        </View>
+          <View style={{ flexDirection: 'row', justifyContent: 'flex-end', alignItems: 'center', marginTop: 2 }}>
+            {msg.edited && <Text style={styles.editedFlag}>(edited)</Text>}
+            <View style={styles.tickRow}>{renderTicks()}</View>
+          </View>
+        </TouchableOpacity>
       );
     }
 
     return null;
   };
 
-  // ✅ Alignment container
   const container = {
-    width: '100%',
-    flexDirection: isMine ? 'row-reverse' : 'row',
     paddingHorizontal: 8,
     marginVertical: 3,
-  };
+    alignItems: isMine ? "flex-end" : "flex-start",
+  } as const;
 
   return (
     <GestureHandlerRootView>
@@ -209,23 +241,30 @@ const ChatMessageBox = ({
         onSwipeableWillOpen={onSwipe}
         ref={updateRowRef}
       >
-        <TouchableOpacity activeOpacity={0.8} onLongPress={onLongPress}>
-          <View style={container}>{renderMessageBody()}</View>
+        <TouchableOpacity activeOpacity={0.9} onLongPress={onLongPress}>
+          <View
+            style={container}
+            onLayout={(e) => {
+              if (msg?._id) {
+                props.onMeasure?.(msg._id, e.nativeEvent.layout.y);
+              }
+            }}
+          >
+            {renderMessageBody()}
+          </View>
         </TouchableOpacity>
       </Swipeable>
     </GestureHandlerRootView>
   );
 };
 
+
 const styles = StyleSheet.create({
   bubble: {
     padding: 8,
     borderRadius: 10,
     maxWidth: '80%',
-  },
-  text: {
-    color: '#111',
-    fontSize: 16,
+    minWidth: 100,
   },
   mediaImage: {
     width: 230,
@@ -243,44 +282,40 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     alignItems: 'center',
   },
-  replyBubble: {
-    backgroundColor: '#e8e8e8',
-    borderLeftColor: '#25D366',
-    borderLeftWidth: 4,
-    padding: 6,
-    borderRadius: 6,
-    marginBottom: 5,
+  tickRow: {
+    marginLeft: 4,
+    marginBottom: 2,
   },
-  replySender: {
-    fontWeight: 'bold',
-    color: '#25D366',
-    fontSize: 13,
+  text: {
+    color: '#111',
+    fontSize: 16,
+  },
+  replyBubble: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: 'rgba(0,0,0,0.05)',
+    borderRadius: 7,
+    paddingVertical: 5,
+    paddingHorizontal: 6,
+    marginBottom: 4,
+  },
+  replyStripe: {
+    width: 3,
+    height: '100%',
+    backgroundColor: '#25D366',
+    borderRadius: 2,
+    marginRight: 6,
   },
   replyPreviewText: {
-    color: '#333',
+    flex: 1,
+    fontSize: 12,
+    color: '#222',
   },
   editedFlag: {
     fontSize: 10,
     color: 'gray',
-    marginTop: 2,
-    alignSelf: 'flex-end',
-  },
-  contactCard: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    backgroundColor: '#f0f0f0',
-    padding: 10,
-    borderRadius: 8,
-    marginTop: 4,
-  },
-  contactName: {
-    fontSize: 16,
-    fontWeight: '600',
-    color: '#128C7E',
-  },
-  contactLabel: {
-    fontSize: 13,
-    color: '#555',
+    marginRight: 4,
+    fontStyle: 'italic',
   },
 });
 

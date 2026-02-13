@@ -5,25 +5,9 @@ import { useRouter, useFocusEffect } from 'expo-router';
 import { useAuth } from '@clerk/clerk-expo';
 import Colors from '@/constants/Colors';
 import { Ionicons } from '@expo/vector-icons';
+import { Stack } from "expo-router";
 
 
-// 2. Define and export the screen options
-export const CustomScreen = () => {
-  return (
-    <Screen
-      options={{
-        title: 'Select Contact', // You can set your desired title here
-        headerStyle: {
-          backgroundColor: Colors.primary, // Optional: Style the header
-        },
-        headerTintColor: '#fff', // Optional: Change the title and back button color
-        headerTitleStyle: {
-          fontWeight: 'bold',
-        },
-      }}
-    />
-  );
-};
 
 const ContactsScreen = () => {
   const [contacts, setContacts] = useState<any[]>([]);
@@ -65,7 +49,7 @@ const ContactsScreen = () => {
       console.error("res.data contacts list  details:", res.data);
     } catch (err: any) {
       console.error("Error fetching contacts:", err);
-      if (error.errors) console.error("Clerk error details:", error.errors);
+      if (error?.errors) console.error("Clerk error details:", error.errors);
       setError("Failed to load contacts. Please check your connection.");
     } finally {
       // This will now correctly turn off the loading indicator once
@@ -82,6 +66,15 @@ const ContactsScreen = () => {
   }
 
   return (
+    <>
+  <Stack.Screen
+    options={{
+      title: "Select Contact",
+      headerStyle: { backgroundColor: Colors.primary },
+      headerTintColor: "#fff",
+      headerTitleStyle: { fontWeight: "bold" },
+    }}
+  />
     <View style={styles.container}>
       <FlatList
         data={contacts}
@@ -91,7 +84,9 @@ const ContactsScreen = () => {
     <TouchableOpacity
       style={styles.row}
       // Pressing the main part of the row will go to the chat screen
-      onPress={() =>
+      onPress={(e) =>{
+         e.stopPropagation();
+         console.log("CALL BUTTON PRESSED");
         router.push({
           pathname: '/(tabs)/chats/[chatId]', // <- CHANGE THIS to your chat screen path
           params: {
@@ -101,7 +96,7 @@ const ContactsScreen = () => {
             image: item.photoUrl || item.profilePic,
             isRoom: false,
           },
-        })
+        })}
       }>
       <Image source={{ uri: item.photoUrl || item.profilePic }} style={styles.avatar} />
 
@@ -114,16 +109,18 @@ const ContactsScreen = () => {
       <View style={styles.actionsContainer}>
         <TouchableOpacity
           style={{ marginRight: 15 }}
-          onPress={() =>
+          onPress={(e) =>{
+              e.stopPropagation();
+              console.log("CALL BUTTON PRESSED");
             router.push({
-              pathname: '/(tabs)/contacts/newCall',
+              pathname: '/call/newCall',
               params: {
                 id: String(item.clerkId),
                 name: String(item.name || item.username),
                 image: String(item.photoUrl || item.profilePic),
                 type: 'audio',
               },
-            })
+            })}
           }
         >
     <Ionicons name="call-outline" size={24} color={Colors.primary} />
@@ -131,16 +128,18 @@ const ContactsScreen = () => {
 
   {/* Video Call Button */}
 <TouchableOpacity
-  onPress={() =>
+  onPress={(e) =>{
+     e.stopPropagation();
+    console.log("CALL BUTTON PRESSED");
     router.push({
-      pathname: '/(tabs)/contacts/newCall',
+      pathname: '/call/newCall',
       params: {
         id: String(item.clerkId),
         name: String(item.name || item.username),
         image: String(item.photoUrl || item.profilePic),
         type: 'video',
       },
-    })
+    })}
   }
 >
 
@@ -154,6 +153,7 @@ const ContactsScreen = () => {
         ListEmptyComponent={<Text style={styles.errorText}>No contacts found.</Text>}
       />
     </View>
+    </>
   );
 };
 

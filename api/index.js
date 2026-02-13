@@ -7,6 +7,7 @@ const { Server } = require("socket.io");
 
 const User = require('./models/User');
 const Message = require('./models/Message');
+const Chat = require('./models/Chat'); // ✅ Added Chat Model
 const userRoutes = require("./routes/user");
 const chatRoutes = require("./routes/chats");
 const messageRoutes = require("./routes/messages");
@@ -14,9 +15,7 @@ const myroomRoutes = require("./routes/rooms");
 const callsRoutesFactory = require("./routes/calls");
 const paymentRouter = require('./routes/payment');
 
-
 const { ClerkExpressRequireAuth } = require('@clerk/clerk-sdk-node');
-
 
 const app = express();
 const server = http.createServer(app);
@@ -25,7 +24,7 @@ const io = new Server(server, {
   cors: { origin: "*", methods: ["GET","POST","PUT","PATCH","DELETE","OPTIONS"] },
 });
 
-// track online users: key = userId (the same id you send from client), value = socket.id
+// track online users: key = userId (string), value = socket.id
 const onlineUsers = new Map();
 
 app.use(ClerkExpressRequireAuth());
@@ -36,8 +35,8 @@ app.use(express.json());
 app.set('io', io);
 app.set('onlineUsers', onlineUsers);
 
-// mount routes (callsRoutesFactory doesn't need parameter because routes read io from req.app)
 const callRoutes = callsRoutesFactory();
+
 app.get("/", (req, res) => {
   res.send("API is running ✅");
 });
@@ -48,7 +47,6 @@ app.use("/api/chats", chatRoutes);
 app.use("/api/messages", messageRoutes);
 app.use("/api/rooms", myroomRoutes);
 app.use('/api/payments', paymentRouter);
-
 
 // DB + start
 mongoose.connect(process.env.MONGO_URI)
@@ -68,16 +66,41 @@ io.on("connection", (socket) => {
   socket.on("register", (userId) => {
     try {
       if (!userId) return;
-      onlineUsers.set(userId, socket.id);
-      console.log(`🟢 Registered ${userId} -> ${socket.id} (onlineUsers size: ${onlineUsers.size})`);
-      socket.emit("user-online", userId);
+      const uid = String(userId);
+      onlineUsers.set(uid, socket.id);
+      console.log(`🟢 Registered ${uid} -> ${socket.id} (onlineUsers size: ${onlineUsers.size})`);
+      socket.emit("user-online", uid);
     } catch (e) {
       console.error('⚠️ register handler error', e);
     }
   });
 
+  // --- 🚀 NEW: GROUP CALL LOGIC (Injected) ---
+  socket.on("group-call-invite", ({ callId, inviteeId, initiatorName, type }) => {
+    const inviteeSocketId = onlineUsers.get(String(inviteeId));
+    if (inviteeSocketId) {
+      console.log(`📤 Group Invite: ${initiatorName} -> ${inviteeId} (Call: ${callId})`);
+      // Reuse your existing incoming-call event so the frontend "just works"
+      io.to(inviteeSocketId).emit("incoming-call", {
+        callId,
+        callerId: socket.userId || initiatorName, // Fallback if userId isn't on socket
+        callerName: `${initiatorName}`,
+        type,
+        isGroup: true // Flag to identify it's an addition to a call
+      });
+    }
+  });
 
-  // ========= 🧩 EXISTING CHAT LOGIC (Unchanged) =========
+  socket.on("join-group-call", ({ callId }) => {
+    socket.join(callId);
+    console.log(`👥 Socket ${socket.id} joined group room: ${callId}`);
+    // Notify others in the room
+    socket.to(callId).emit("participant-joined", {
+      userId: socket.userId,
+      socketId: socket.id
+    });
+  });
+  
   socket.on("join-rooms", (roomIds) => {
     if (Array.isArray(roomIds)) {
       roomIds.forEach(roomId => {
@@ -92,203 +115,252 @@ io.on("connection", (socket) => {
     console.log(`👥 Joined room ${roomId}`);
   });
 
-    socket.on("new-message", async (msg) => {
-      try {
-        const {
-          id: clientId,
-          text,
-          senderId,
-          receiverId,
-          roomId,
-          image,
-          audio,
-          video,
-          createdAt,
-          replyTo
-        } = msg;
+  socket.on("new-message", async (msg) => {
+    try {
+      let {
+        id: clientId,
+        text,
+        senderId,
+        receiverId,
+        roomId, // This functions as the Chat ID
+        image,
+        audio,
+        video,
+        createdAt,
+        replyTo
+      } = msg;
 
-        // ✅ Sender details
-        const sender = await User.findOne({ clerkId: senderId }).lean();
-        const senderName = sender?.name || sender?.username || "Unknown";
+      console.log("📨 Processing message...");
 
-        // ✅ Prepare reply object
-        let replyToObj = null;
-        if (replyTo) {
-          const original = await Message.findById(replyTo).lean();
-          if (original) {
-            const senderUser = await User.findOne({ clerkId: original.senderId }).lean();
-            replyToObj = {
-              _id: original._id,
-              text: original.text || "",
-              senderId: original.senderId,
-              senderName: senderUser?.name || "Unknown",
-              image: original.image || null,
-              video: original.video || null,
-              audio: original.audio || null
-            };
-          }
+      // ✅ FIX 1: Find or Create Chat ID if missing (Prevents separate chat threads)
+      if (!roomId && receiverId) {
+        const existingChat = await Chat.findOne({
+          isGroupChat: false,
+          $and: [
+            { users: { $elemMatch: { $eq: senderId } } },
+            { users: { $elemMatch: { $eq: receiverId } } },
+          ],
+        });
+
+        if (existingChat) {
+          roomId = existingChat._id.toString();
+        } else {
+          // Fallback: Create chat if it doesn't exist to prevent orphans
+          const chatData = {
+            chatName: "sender",
+            isGroupChat: false,
+            users: [senderId, receiverId],
+          };
+          const createdChat = await Chat.create(chatData);
+          roomId = createdChat._id.toString();
         }
+      }
 
-        // ✅ Build message data
-        const messageData = {
-          senderId,
-          senderName,
-          text: text || "",
-          image: image || null,
-          audio: audio || null,
-          video: video || null,
-          replyTo: replyToObj,
-          createdAt: createdAt ? new Date(createdAt) : new Date(),
-        };
+      // ---- sender info ----
+      const sender = await User.findOne({ clerkId: senderId }).lean();
+      const senderName = sender?.username || sender?.name || "User";
 
-        // ✅ Add receiver/group target
-        if (receiverId) messageData.receiverId = receiverId;
-        if (roomId) messageData.roomId = roomId;
+      // ---- reply object ----
+      let replyToObj = null;
+      if (replyTo) {
+        const original = await Message.findById(replyTo).lean();
+        if (original) {
+          replyToObj = {
+            _id: original._id,
+            text: original.text,
+            image: original.image,
+            video: original.video,
+            audio: original.audio,
+            senderId: original.senderId,
+          };
+        }
+      }
 
-        // ✅ Save message
-        const saved = await Message.create(messageData);
+      // ---- save message ----
+      const saved = await Message.create({
+        clientId,
+        text: text || "",
+        senderId,
+        receiverId,
+        roomId,
+        chat: roomId, // ✅ Ensure linkage
+        image,
+        audio,
+        video,
+        replyTo: replyToObj,
+        createdAt: createdAt ? new Date(createdAt) : new Date(),
+        status: "sent"
+      });
+
+      // ✅ FIX 2: Update Latest Message in Chat
+      if (roomId) {
+        await Chat.findByIdAndUpdate(roomId, { latestMessage: saved._id });
+      }
 
       const outgoing = {
         _id: saved._id,
         clientId,
         text: saved.text,
-        createdAt: saved.createdAt,
         senderId,
         senderName,
         receiverId,
         roomId,
-        replyTo: replyToObj,
         image,
+        audio,
         video,
-        audio
+        replyTo: replyToObj,
+        createdAt: saved.createdAt,
+        status: "sent"
       };
-        // ✅ Emit to correct users
-        if (roomId) {
-          io.to(roomId).emit("room-message", outgoing);
+
+      // =====================
+      // PRIVATE DELIVERY
+      // =====================
+      if (receiverId) {
+        const receiverSocket = onlineUsers.get(String(receiverId));
+
+        // sender ack
+        socket.emit("private-message", outgoing);
+
+        if (receiverSocket) {
+          // send to receiver
+          io.to(receiverSocket).emit("private-message", outgoing);
+
+          // ✅ UPDATE DB → delivered
+          await Message.findByIdAndUpdate(saved._id, {
+            status: "delivered"
+          });
+
+          // ✅ notify sender → double tick
+          io.to(socket.id).emit("message-delivered", {
+            messageId: saved._id
+          });
         }
-
-        if (receiverId) {
-          socket.emit("private-message", outgoing);
-
-          const receiverSocketId = onlineUsers.get(receiverId);
-          if (receiverSocketId) {
-            io.to(receiverSocketId).emit("private-message", outgoing);
-          }
-        }
-
-      } catch (err) {
-        console.error("❌ new-message error:", err);
       }
-    });
 
+      // =====================
+      // ROOM DELIVERY
+      // =====================
+      if (roomId) {
+        io.to(roomId).emit("room-message", outgoing);
 
-    socket.on("edit-message", async ({ messageId, newText }) => {
-      try {
-        const updated = await Message.findByIdAndUpdate(
-          messageId,
-          { text: newText, edited: true },
-          { new: true }
-        ).lean();
-        if (updated) io.emit("message-edited", updated);
-      } catch (e) { console.error("edit-message error:", e); }
-    });
+        const members = io.sockets.adapter.rooms.get(roomId);
 
-    socket.on("delete-message", async ({ messageId }) => {
-      try {
-        const del = await Message.findByIdAndDelete(messageId);
-        if (del) io.emit("message-deleted", { messageId });
-      } catch (e) { console.error("delete-message error:", e); }
-    });
+        if (members && members.size > 1) {
+          // ✅ persist delivered
+          await Message.findByIdAndUpdate(saved._id, {
+            status: "delivered"
+          });
 
-  // Relay offer to receiver socket
-  socket.on("offer", ({ offer, callId, to }) => {
-   console.log("📤 offer:,callId,To", callId, to);
-    const onlineUsers = app.get("onlineUsers");
-    const receiverSocketId = onlineUsers.get(to); // 'to' is Clerk ID
-    if (receiverSocketId) {
-      io.to(receiverSocketId).emit("offer", { offer, callId });
-      console.log("📤 Relayed offer to receiver socket:", receiverSocketId);
-    } else {
-      console.warn("⚠️ Receiver socket not found for Clerk ID:", to);
+          io.to(socket.id).emit("message-delivered", {
+            messageId: saved._id
+          });
+        }
+      }
+
+    } catch (err) {
+      console.error("❌ new-message error:", err);
     }
   });
 
+  socket.on("messages-seen", async ({ withUser }) => {
+    try {
+      await Message.updateMany(
+        {
+          senderId: withUser,
+          receiverId: { $exists: true },
+          status: "delivered"
+        },
+        { status: "seen" }
+      );
 
-    // Relay answer to caller
-    socket.on("answer", ({ answer, callId, to }) => {
-      const callerSocketId = onlineUsers.get(to);
-      if (callerSocketId) {
-        io.to(callerSocketId).emit("answer", { answer, callId });
-        console.log(`📤 Relayed answer to caller socket ${callerSocketId} for call ${callId}`);
-      } else {
-        console.warn(`⚠️ Answer relay failed — caller ${to} not online`);
+      const senderSocket = onlineUsers.get(String(withUser));
+
+      if (senderSocket) {
+        io.to(senderSocket).emit("messages-seen-update", {
+          withUser
+        });
       }
-    });
+    } catch (e) {
+      console.error("seen update error", e);
+    }
+  });
 
-    // Relay ICE candidate
-    socket.on("ice-candidate", ({ candidate, callId, to }) => {
-      const targetSocketId = onlineUsers.get(to);
-      if (targetSocketId) {
-        io.to(targetSocketId).emit("ice-candidate", { candidate, callId });
-        console.log(`🧊 Relayed ICE candidate to ${targetSocketId} for call ${callId}`);
-      } else {
-        console.warn(`⚠️ ICE relay failed — target ${to} not online`);
+  // ✅ FIX: Expect 'text', not 'newText' to match frontend payload
+  socket.on("edit-message", async ({ messageId, text }) => {
+    try {
+      const updated = await Message.findByIdAndUpdate(
+        messageId,
+        { text: text, edited: true },
+        { new: true }
+      ).lean();
+      if (updated) io.emit("message-edited", updated);
+    } catch (e) { console.error("edit-message error:", e); }
+  });
+
+  socket.on("delete-message", async ({ messageId }) => {
+    try {
+      const del = await Message.findByIdAndDelete(messageId);
+      if (del) io.emit("message-deleted", { messageId });
+    } catch (e) { console.error("delete-message error:", e); }
+  });
+
+  // Call handling logic remains unchanged
+  socket.on("offer", ({ offer, callId, to }) => {
+    const receiverSocketId = onlineUsers.get(String(to));
+    if (receiverSocketId) {
+      io.to(receiverSocketId).emit("offer", { offer, callId });
+    }
+  });
+
+  socket.on("answer", ({ answer, callId, to }) => {
+    const callerSocketId = onlineUsers.get(String(to));
+    if (callerSocketId) {
+      io.to(callerSocketId).emit("answer", { answer, callId });
+    }
+  });
+
+  socket.on("ice-candidate", ({ candidate, callId, to }) => {
+    const targetSocketId = onlineUsers.get(String(to));
+    if (targetSocketId) {
+      io.to(targetSocketId).emit("ice-candidate", { candidate, callId });
+    }
+  });
+
+  socket.on("typing", ({ senderId, receiverId, roomId }) => {
+    if (roomId) {
+      io.to(roomId).emit("typing", { senderId, roomId });
+    } else if (receiverId) {
+      const receiverSocket = onlineUsers.get(String(receiverId));
+      if (receiverSocket) {
+        io.to(receiverSocket).emit("typing", { senderId, receiverId });
       }
-    });
+    }
+  });
 
-    socket.on("typing", ({ senderId, receiverId, roomId }) => {
-      if (roomId) {
-        io.to(roomId).emit("typing", { senderId, roomId });
-      } else if (receiverId) {
-        const receiverSocket = onlineUsers.get(receiverId);
-        if (receiverSocket) {
-          io.to(receiverSocket).emit("typing", { senderId, receiverId });
-        }
+  socket.on("stop-typing", ({ senderId, receiverId, roomId }) => {
+    if (roomId) {
+      io.to(roomId).emit("stop-typing", { senderId, roomId });
+    } else if (receiverId) {
+      const receiverSocket = onlineUsers.get(String(receiverId));
+      if (receiverSocket) {
+        io.to(receiverSocket).emit("stop-typing", { senderId, receiverId });
       }
-    });
-
-
-socket.on("react-message", async ({ messageId, emoji, userId, roomId }) => {
-  await Message.findByIdAndUpdate(messageId, { $pull: { reactions: { userId } } });
-  const updated = await Message.findByIdAndUpdate(
-    messageId,
-    { $push: { reactions: { userId, emoji, reactedAt: new Date() } } },
-    { new: true }
-  );
-
-  if (roomId) {
-    io.to(roomId).emit("message-updated", updated);
-  } else {
-    io.emit("message-updated", updated);
-  }
-});
-
-    socket.on("stop-typing", ({ senderId, receiverId, roomId }) => {
-      if (roomId) {
-        io.to(roomId).emit("stop-typing", { senderId, roomId });
-      } else if (receiverId) {
-        const receiverSocket = onlineUsers.get(receiverId);
-        if (receiverSocket) {
-          io.to(receiverSocket).emit("stop-typing", { senderId, receiverId });
-        }
-      }
-    });
-
+    }
+  });
 
   // cleanup on disconnect
   socket.on("disconnect", () => {
-  let offlineUser = null;
+    let offlineUser = null;
     for (const [userId, sid] of onlineUsers.entries()) {
       if (sid === socket.id) {
-        offlineUsers = userId;
+        offlineUser = userId;
         onlineUsers.delete(userId);
-        console.log(`❌ User ${userId} disconnected (socket ${socket.id}). onlineUsers size: ${onlineUsers.size}`);
         break;
       }
     }
-    if (offlineUser){
-     console.log("❌ User offline:", offlineUser);
-     socket.emit("user-offline", offlineUser);
+    if (offlineUser) {
+      socket.broadcast.emit("user-offline", offlineUser);
     }
   });
 });

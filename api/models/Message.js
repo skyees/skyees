@@ -16,7 +16,11 @@ const MessageSchema = new mongoose.Schema({
   senderId: { type: String, required: true },
   receiverId: String,
   roomId: String,
-
+  status: {
+    type: String,
+    enum: ["sending","sent","delivered","seen"],
+    default: "sent"
+  },
   replyTo: { type: mongoose.Schema.Types.ObjectId, ref: "Message", default: null },
 
   createdAt: { type: Date, default: Date.now },

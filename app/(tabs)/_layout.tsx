@@ -2,53 +2,12 @@ import Colors from '@/constants/Colors';
 import { Ionicons, MaterialIcons, MaterialCommunityIcons } from '@expo/vector-icons';
 import { Tabs, useSegments, useRouter } from 'expo-router'; 
 import { GestureHandlerRootView } from 'react-native-gesture-handler';
-import { useEffect } from 'react'; 
-import useSocket from '@/utils/socket'; 
-import { useUser } from '@clerk/clerk-expo';
 
 const TabsLayout = () => {
   const segments = useSegments();
-  const router = useRouter(); 
-  const socket = useSocket(); 
-  const { user, isLoaded, isSignedIn } = useUser();
 
-  // --- GLOBAL LISTENERS ---
-  useEffect(() => {
-    if (!socket || !isLoaded || !isSignedIn || !user) return;
-
-    const onConnect = () => {
-      console.log("🔌 Connected! Registering User:", user.id);
-      socket.emit("register", user.id); 
-    };
-
-    const handleIncomingCall = (data: any) => {
 
  
-      console.log("🔔 GLOBAL: Incoming call detected!", data);
-      setTimeout(() => {
-        router.push({
-          pathname: '/(tabs)/calls/Incoming',
-          params: {
-            _id: data._id, 
-            callerId: data.callerId,
-            callerName: data.callerName,
-            callerImg: data.callerImg || "", // Prevent Image Crash
-            receiverId: data.receiverId,
-            callType: data.callType
-          }
-        });
-      }, 100);
-    };
-
-    socket.on("connect", onConnect);
-    socket.on('incoming-call', handleIncomingCall);
-    if (socket.connected) onConnect();
-
-    return () => {
-      socket.off("connect", onConnect);
-      socket.off('incoming-call', handleIncomingCall);
-    };
-  }, [socket, user, isLoaded, isSignedIn, router]);
 
   return (
     <GestureHandlerRootView style={{ flex: 1 }}>
