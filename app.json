@@ -9,6 +9,7 @@
     },
     "android": {
       "package": "com.goboss.skyees",
+      "versionCode": 11,
       "intentFilters": [
         {
           "action": "VIEW",
@@ -16,9 +17,12 @@
             "scheme": "skyees",
             "host": "join-call"
           },
-          "category": ["BROWSABLE", "DEFAULT"]
+          "category": [
+            "BROWSABLE",
+            "DEFAULT"
+          ]
         }
-      ], 
+      ],
       "permissions": [
         "android.permission.CAMERA",
         "android.permission.RECORD_AUDIO",
@@ -34,7 +38,7 @@
       }
     },
     "plugins": [
-      "expo-build-properties",     
+      "expo-build-properties"
     ],
     "extra": {
       "eas": {

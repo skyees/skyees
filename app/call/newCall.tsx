@@ -1,4 +1,4 @@
-import React, { useEffect, useState, useRef } from 'react';
+import React, { useEffect, useState, useRef, useCallback } from 'react';
 import {
   View,
   Text,
@@ -8,7 +8,7 @@ import {
   ImageBackground,
   StatusBar
 } from 'react-native';
-import { useLocalSearchParams, useRouter} from 'expo-router';
+import { useLocalSearchParams, useRouter } from 'expo-router';
 import { MaterialIcons } from '@expo/vector-icons';
 import { BlurView } from 'expo-blur';
 import axios from 'axios';
@@ -27,7 +27,6 @@ import Animated, {
 } from 'react-native-reanimated';
 import InCallManager from 'react-native-incall-manager';
 
-
 const NewCallScreen = () => {
   const { user } = useUser();
   const router = useRouter();
@@ -37,7 +36,7 @@ const NewCallScreen = () => {
 
   const { name, image, id: receiverId, type, origin } = useLocalSearchParams();
 
-  const [status] = useState('initiating');
+  const [status, setStatus] = useState('initiating');
   const callIdRef = useRef<string | null>(null);
   const isNavigating = useRef(false);
 
@@ -45,19 +44,14 @@ const NewCallScreen = () => {
   const ringOpacity = useSharedValue(0.5);
   const screenOpacity = useSharedValue(0);
   const screenScale = useSharedValue(0.96);
-  const callType = type === 'video' ? 'video' : 'audio';
+  
   const avatarSource =
     image && typeof image === 'string' && image.trim().length > 5
       ? { uri: image }
       : require("@/assets/images/user-default.jpg");
 
-
-     
-      
-  // ---------- ENTRY ----------
+  // ---------- ANIMATIONS ----------
   useEffect(() => {
-
- 
     screenOpacity.value = withTiming(1, { duration: 400 });
     screenScale.value = withSpring(1, { damping: 15, stiffness: 100 });
 
@@ -79,10 +73,13 @@ const NewCallScreen = () => {
       false
     );
 
+    // Start ringtone immediately
+    InCallManager.start({ media: 'audio', ringback: '_BUNDLE_' });
+
     return () => {
       InCallManager.stopRingback();
       InCallManager.stop();
-        };
+    };
   }, []);
 
   const animatedRingStyle = useAnimatedStyle(() => ({
@@ -95,49 +92,56 @@ const NewCallScreen = () => {
     transform: [{ scale: screenScale.value }]
   }));
 
-  // ---------- EXIT (same model as Incoming) ----------
-  const runExit = (next: () => void) => {
-    'worklet';
+  // ---------- NAVIGATION HELPERS ----------
+  
+  const runExit = useCallback((next: () => void) => {
+    'worklet'; 
+    // Note: 'worklet' directive is for UI thread, but we are calling JS callbacks.
+    // It's safer to keep this simple or use runOnJS inside the callback.
     screenScale.value = withTiming(0.94, { duration: 200 });
     screenOpacity.value = withTiming(0, { duration: 200 }, (finished) => {
-      if (finished) runOnJS(next)();
+      if (finished) {
+        runOnJS(next)();
+      }
     });
-  };
+  }, []);
 
-const safeClose = () => {
-  if (isNavigating.current) return;
-  isNavigating.current = true;
+  const safeClose = useCallback(() => {
+    if (isNavigating.current) return;
+    isNavigating.current = true;
 
-  // Kill ALL hardware immediately
-  InCallManager.stopRingtone();
-  InCallManager.stopRingback();
-  InCallManager.stop();
+    InCallManager.stopRingtone();
+    InCallManager.stopRingback();
+    InCallManager.stop();
 
-  runExit(() => {
-    // Check if we can dismiss, otherwise force replace
-      router.dismissAll();
+    runExit(() => {
+      if (router.canGoBack()) {
+        router.back();
+      } else {
+        router.replace('/(tabs)/calls');
+      }
+    });
+  }, [router, runExit]);
+
+  // ---------- SOCKET EVENTS ----------
+
+  const onAccepted = useCallback((data: any) => {
+    console.log("Call Accepted:", data);
+    if (isNavigating.current) return;
+    isNavigating.current = true;
     
-    // Ensure we end up on the calls tab
-    router.replace('/(tabs)/calls');
-  });
-};
-  // ---------- SIGNALING ----------
-  useEffect(() => {
-    if (status === 'initiating') initiateCall();
+    InCallManager.stopRingback(); // Stop ringback immediately
 
-    const onAccepted = (data: any) => {
-      if (isNavigating.current) return;
-      isNavigating.current = true;
-      InCallManager.stopRingback();
-
-      runExit(() => {
+    runExit(() => {
+      // Navigate to the active call screen
+      // We use 'replace' so the user can't "go back" to the ringing screen
       router.replace({
         pathname: '/call/Call',
         params: {
-          callId: data._id || data.callId,
+          callId: data._id || data.callId || callIdRef.current,
           callerId: user?.id,
           receiverId,
-          callerName: name,
+          callerName: name, // Name of person we are calling
           type,
           isCaller: 'true',
           image,
@@ -145,69 +149,84 @@ const safeClose = () => {
         },
       });
     });
+  }, [name, receiverId, type, image, origin, user?.id, runExit, router]);
+
+  useEffect(() => {
+    // 1. Initiate Call API
+    const initiateCall = async () => {
+      try {
+        const token = await getToken();
+        // Important: Make sure 'receiverId' is actually the ID string, not an object
+        const res = await axios.post(
+          `${API_URL}/api/calls`,
+          { 
+            callerId: user?.id, 
+            receiverId: Array.isArray(receiverId) ? receiverId[0] : receiverId, 
+            callType: type 
+          },
+          { headers: { Authorization: `Bearer ${token}` } }
+        );
+        
+        const newCallId = String(res.data._id);
+        callIdRef.current = newCallId;
+
+        // Emit socket event to join room
+        socket?.emit("join-call-room", { callId: newCallId });
+
+      } catch (error) {
+        console.error("Initiate call failed:", error);
+        safeClose();
+      }
     };
 
+    if (status === 'initiating') {
+      initiateCall();
+    }
+
+    // 2. Setup Listeners
     socket.on('call-ended', safeClose);
     socket.on('call-declined', safeClose);
     socket.on('call-accepted', onAccepted);
 
+    // 3. Cleanup
     return () => {
-      socket.off('call-ended');
-      socket.off('call-declined');
-      socket.off('call-accepted');
+      socket.off('call-ended', safeClose);
+      socket.off('call-declined', safeClose);
+      socket.off('call-accepted', onAccepted);
     };
-  }, [status, socket, user?.id, receiverId, type]);
+  }, [status, socket, user?.id, receiverId, type, onAccepted, safeClose]);
 
-const initiateCall = async () => {
-  try {
-    const token = await getToken();
-    const res = await axios.post(
-      `${API_URL}/api/calls`,
-      { callerId: user?.id, receiverId, callType: type },
-      { headers: { Authorization: `Bearer ${token}` } }
-    );
-    
-    // ✅ Store the ID immediately
-    const newCallId = String(res.data._id);
-    callIdRef.current = newCallId;
 
-    // ✅ Emit a "start" event so the server links this socket to this callId
-    socket?.emit("join-call-room", { callId: newCallId });
+  // ---------- HANDLERS ----------
+
+  const onCancelPress = async () => {
+    if (isNavigating.current) return;
     
-  } catch (error) {
-    console.error("Initiate failed", error);
+    InCallManager.stopRingback();
+    
+    // Emit end event
+    socket?.emit("call-end", { 
+      to: receiverId, 
+      callId: callIdRef.current 
+    });
+
+    // API update if we have a call ID
+    if (callIdRef.current) {
+      const token = await getToken();
+      axios.put(`${API_URL}/api/calls/end`, 
+        { callId: callIdRef.current, status: "missed" },
+        { headers: { Authorization: `Bearer ${token}` } }
+      ).catch((err) => console.log("Error ending call API", err));
+    }
+
     safeClose();
-  }
-};
-
-const onCancelPress = async () => {
-  InCallManager.stopRingback();
-  InCallManager.stop();
-
-  // ✅ ALWAYS emit to the receiverId as a backup if callId is null
-  socket?.emit("call-end", { 
-    to: receiverId, 
-    callId: callIdRef.current || 'pending' 
-  });
-
-  if (callIdRef.current) {
-    const token = await getToken();
-    axios.put(`${API_URL}/api/calls/end`, 
-      { callId: callIdRef.current, status: "missed" },
-      { headers: { Authorization: `Bearer ${token}` } }
-    ).catch(() => {});
-  }
-
-  safeClose();
-};
+  };
 
   return (
     <Animated.View style={[{ flex: 1 }, screenAnimStyle]}>
       <StatusBar hidden />
 
       <ImageBackground source={avatarSource} style={styles.background} blurRadius={80}>
-        <StatusBar barStyle="light-content" hidden />
-
         <BlurView intensity={45} tint="dark" style={styles.container}>
           <View />
 
